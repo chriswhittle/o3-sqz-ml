@@ -1,0 +1,11 @@
+keytab_path: /path/to/your.keytab
+
+start_gps: 1256875000
+end_gps: 1269734418
+
+no_sqz_start_gps: 1259798868
+no_sqz_end_gps: 1259799468
+
+channels:
+ L1:SQZ-OPO_TEC_THERMISTOR_TEMPERATURE.mean,m-trend: OPO Temp.
+ L1:SQZ-SHG_TEC_THERMISTOR_TEMPERATURE.mean,m-trend: SHG Temp.
