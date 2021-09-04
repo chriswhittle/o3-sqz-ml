@@ -25,7 +25,7 @@ def mag2db(mag):
 
 def fetch_sqz(start_gps, end_gps, no_sqz_start_gps, no_sqz_end_gps,
               ifo, sqz_path, blrms_lims, veto_channels,
-              overlap_fraction=0.7, batch_size=600,
+              overlap_fraction=0.7, batch_size=1800,
               average='median', **kwargs):
     OMC_CHANNEL_NAMES = [f'{ifo}:OMC-DCPD_{c}_OUT_DQ' for c in 'AB']
 
@@ -62,9 +62,10 @@ def fetch_sqz(start_gps, end_gps, no_sqz_start_gps, no_sqz_end_gps,
     }
     average_fn = np.median if average == 'median' else np.mean
 
+    # use mean for the cross-correlation
     _, xcorr = scipy.signal.csd(no_sqz_timeseries[OMC_CHANNEL_NAMES[0]],
                                 no_sqz_timeseries[OMC_CHANNEL_NAMES[1]],
-                                **csd_settings)
+                                **dict(csd_settings, **{'average': 'mean'}))
 
     logging.info('Computed non-squeeze cross-correlation.')
 
@@ -103,7 +104,8 @@ def fetch_sqz(start_gps, end_gps, no_sqz_start_gps, no_sqz_end_gps,
 
             # grab OMC data for current batch
             omc_timeseries = fetch_timeseries(OMC_CHANNEL_NAMES,
-                                              t, t + batch_size)
+                                              current_gps,
+                                              current_gps + batch_size)
             # store squeezing levels from this batch in a list to avoid
             # dataframe appending overhead for every loop
             new_sqz_data_list = []
@@ -124,15 +126,21 @@ def fetch_sqz(start_gps, end_gps, no_sqz_start_gps, no_sqz_end_gps,
                     asd_null = np.sqrt(psd_null)
                     _, psd_sum = scipy.signal.welch(omc_sum,
                                                      **csd_settings)
-                    asd_sum = np.sqrt(psd_sum - 2*np.abs(xcorr))
 
-                    # compute median squeezing level within each
-                    # frequency band
+                    # set negative values to nan to avoid numpy warnings
+                    psd_quantum = psd_sum - 2*np.abs(xcorr)
+                    psd_quantum[np.argwhere(psd_quantum < 0)] = np.nan
+                    asd_sum = np.sqrt(psd_quantum)
+
+                    # compute median squeezing level within each frequency band
                     cur_sqz_levels = [0]*len(blrms_lims)
                     for i, (f_min, f_max) in enumerate(blrms_lims):
-                        f_inds = np.argwhere(np.logical_and.reduce(
+                        # get indices corresponding to each BLRMS bin
+                        f_inds = np.argwhere(np.logical_and.reduce((
                             f>=f_min, f<=f_max, ~np.isnan(asd_sum)
-                        ))
+                        )))
+                        # compute sum/null ratio and convert to dBs to get
+                        # squeezing level
                         cur_sqz_levels[i] = mag2db(
                             average_fn(asd_sum[f_inds])
                             / average_fn(asd_null[f_inds])
@@ -140,10 +148,11 @@ def fetch_sqz(start_gps, end_gps, no_sqz_start_gps, no_sqz_end_gps,
                     new_sqz_data_list += [[t] + cur_sqz_levels]
 
             # append new data to the existing dataframe
-            new_sqz_data = pd.DataFrame.from_dict(new_sqz_data_list)
-            new_sqz_data.columns = [TIME_COL] + sqz_column_names
-            new_sqz_data.set_index(TIME_COL)
-            sqz_data.append(new_sqz_data)
+            if len(new_sqz_data_list) > 0:
+                new_sqz_data = pd.DataFrame.from_dict(new_sqz_data_list)
+                new_sqz_data.columns = [TIME_COL] + sqz_column_names
+                new_sqz_data.set_index(TIME_COL, inplace=True)
+                sqz_data = sqz_data.append(new_sqz_data)
 
             # save checkpoint of data
             sqz_data.to_csv(output_file_path)

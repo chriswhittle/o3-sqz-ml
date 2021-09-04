@@ -1,10 +1,11 @@
-#!/cvmfs/oasis.opensciencegrid.org/ligo/sw/conda/envs/igwn-py37/bin/python
 import os
 import sys
+import tqdm
+import logging
+
 import yaml
 import numpy as np
 import pandas as pd
-import tqdm
 
 from gwpy.timeseries import TimeSeriesDict
 
@@ -21,6 +22,8 @@ def fetch_timeseries(channels, gps_start, gps_end, max_attempts=3):
             return data
         except (KeyError, RuntimeError):
             pass
+    logging.debug(f'Failed to fetch {channels} in {gps_start}-{gps_start} '
+                    + f'after {max_attempts} attempts.')
     return None
 
 
@@ -31,7 +34,7 @@ def times_from_gwpy_timeseries(tdict):
     '''
     return np.arange(tdict.t0.value,
                      tdict.t0.value + len(tdict.value)*tdict.dt.value,
-                     tdict.dt.value, dtype=np.int32)
+                     tdict.dt.value)
 
 def round_gps_time(n, floor=False, segment_length=60):
     '''
