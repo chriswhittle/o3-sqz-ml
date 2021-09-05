@@ -80,14 +80,18 @@ def train_model(save_path, sub_start_gps, sub_end_gps, processed_path,
                 int(str(checkpoint_file).split('-')[1].replace('.hdf5',''))
             ]
 
-        # use the lowest loss checkpoint
-        ckpt = available_epochs[np.argmin(
-            loss_history[np.minimum(
-                    available_epochs, neural_network['epochs']-1
-                ), 1]
-            )]
-        
-        model.load_weights(output_file_path / f'checkpoint-{ckpt:04d}.hdf5')
+        # if no checkpoints saved 
+        if len(available_epochs) == 0:
+            model = tf.saved_model.load(str(output_file_path))
+        else:
+            # use the lowest loss checkpoint
+            ckpt = available_epochs[np.argmin(
+                loss_history[np.minimum(
+                        available_epochs, neural_network['epochs']-1
+                    ), 1]
+                )]
+            
+            model.load_weights(output_file_path / f'checkpoint-{ckpt:04d}.hdf5')
     else:
         # set up callbacks for saving model checkpoints
         steps_per_epoch = training_labels.size / batch_size
