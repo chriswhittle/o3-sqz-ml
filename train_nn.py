@@ -79,13 +79,15 @@ def train_model(save_path, sub_start_gps, sub_end_gps, processed_path,
         available_epochs = []
         for checkpoint_file in output_file_path.glob('*.hdf5'):
             available_epochs += [
-                min(
-                    int(str(checkpoint_file).split('-')[1].replace('.hdf5','')), 
-                    neural_network['epochs']-1
-                )]
+                int(str(checkpoint_file).split('-')[1].replace('.hdf5',''))
+            ]
 
         # use the lowest loss checkpoint
-        ckpt = available_epochs[np.argmin(loss_history[available_epochs, 1])]
+        ckpt = available_epochs[np.argmin(
+            loss_history[np.minimum(
+                    available_epochs, neural_network['epochs']-1
+                ), 1]
+            )]
         
         model.load_weights(output_file_path / f'checkpoint-{ckpt:04d}.hdf5')
     else:
