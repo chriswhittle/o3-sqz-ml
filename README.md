@@ -20,15 +20,19 @@ the path to which should be specified in the configuration file under `keytab_pa
 
 ## Fetching auxiliary data
 
-<!-- Run as:
+Run as:
 
 ```
-./fetch_aux.py path/to/config/file.yaml
+python fetch_aux.py path/to/config/file.yaml
 ```
 
-Same environment requirements as above. -->
+Same environment requirements as above.
 
 ## Processing data
+
+```
+python process_data.py path/to/config/file.yaml
+```
 
 ## Training model
 
