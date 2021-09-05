@@ -13,8 +13,6 @@ from tensorflow.keras import layers
 from tensorflow.keras import callbacks
 from tensorflow.keras.layers.experimental import preprocessing
 
-from fetch_aux import TIME_COL
-
 LOSS_HISTORY_FILENAME = 'loss.txt'
 
 def train_model(save_path, sub_start_gps, sub_end_gps, processed_path,
@@ -23,7 +21,7 @@ def train_model(save_path, sub_start_gps, sub_end_gps, processed_path,
     #### prepare data for training the neural network
 
     # load in data
-    data = pd.read_csv(processed_path, index_col=TIME_COL)
+    data = pd.read_csv(processed_path, index_col='gps_time')
     
     # create output file path if it does not exist
     output_file_path = Path(save_path)
