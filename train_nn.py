@@ -16,7 +16,8 @@ from tensorflow.keras.layers.experimental import preprocessing
 LOSS_HISTORY_FILENAME = 'loss.txt'
 
 def train_model(save_path, sub_start_gps, sub_end_gps, processed_path,
-                nominal_blrms_lims, neural_network, val_fraction=0.2,
+                nominal_blrms_lims, neural_network, cut_channels, channels,
+                val_fraction=0.2, val_start_gps=None, val_end_gps=None,
                 save_period=10, batch_size=512, **kwargs):
     #### prepare data for training the neural network
 
@@ -27,10 +28,6 @@ def train_model(save_path, sub_start_gps, sub_end_gps, processed_path,
     output_file_path = Path(save_path)
     output_file_path.mkdir(exist_ok=True, parents=True)
 
-    # trim data to within given GPS times
-    data.drop(data[(data.index < sub_start_gps) 
-                    | (data.index > sub_end_gps)].index, inplace=True)
-
     # remove other SQZ columns
     sqz_column = f'SQZ_dB {nominal_blrms_lims[0]}-{nominal_blrms_lims[1]}Hz'
     other_sqz = data.columns[data.columns.str.startswith('SQZ')]
@@ -38,10 +35,28 @@ def train_model(save_path, sub_start_gps, sub_end_gps, processed_path,
     data.drop(other_sqz, axis=1, inplace=True)
     data.rename(columns={sqz_column: 'SQZ'}, inplace=True)
 
+    # remove cut channels by first generating list of channels in dataframe
+    # to be removed
+    readable_cut = []
+    for c in cut_channels:
+        if channels[c] in data.columns and channels[c] != 'SQZ':
+            readable_cut += [channels[c]]
+    data.drop(readable_cut, axis=1, inplace=True)
+
     # divide data into training and validation sets
-    split_ind = int((1-val_fraction) * len(data))
-    training_features = data.iloc[:split_ind]
-    validation_features = data.iloc[split_ind:]
+    if val_start_gps is None or val_end_gps is None:
+        # trim data to within given GPS times
+        data.drop(data[(data.index < sub_start_gps) 
+                        | (data.index > sub_end_gps)].index, inplace=True)
+
+        split_ind = int((1-val_fraction) * len(data))
+        training_features = data.iloc[:split_ind]
+        validation_features = data.iloc[split_ind:]
+    else:
+        training_features = data.drop(data[(data.index < sub_start_gps) 
+                        |               (data.index > sub_end_gps)].index)
+        validation_features = data.drop(data[(data.index < val_start_gps) 
+                        |               (data.index > val_end_gps)].index)
 
     training_labels = training_features.pop('SQZ')
     validation_labels = validation_features.pop('SQZ')
