@@ -80,7 +80,8 @@ def fetch_aux(start_gps, end_gps, channels, ifo, aux_path,
         aux_data.to_csv(output_file_path)
     
     logging.info('Fetching auxiliary channel data...')
-    with tqdm.tqdm(total=end_gps-start_gps) as pbar:
+    with tqdm.tqdm(total=end_gps-start_gps,
+                   initial=current_gps-start_gps) as pbar:
         while current_gps <= end_gps:
 
             batch_data = fetch_timeseries(channel_names,
