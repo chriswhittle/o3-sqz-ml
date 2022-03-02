@@ -94,7 +94,7 @@ def fetch_aux(start_gps, end_gps, channels, ifo, aux_path,
                     batch_data[channel_names[0]]
                 )
                 new_aux_data.set_index(TIME_COL, inplace=True)
-                aux_data = aux_data.append(new_aux_data)
+                aux_data = pd.concat((aux_data, new_aux_data))
 
                 # save checkpoint of data
                 aux_data.to_csv(output_file_path)

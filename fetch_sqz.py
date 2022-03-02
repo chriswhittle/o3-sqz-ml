@@ -156,7 +156,7 @@ def fetch_sqz(start_gps, end_gps, no_sqz_start_gps, no_sqz_end_gps,
                     new_sqz_data = pd.DataFrame.from_dict(new_sqz_data_list)
                     new_sqz_data.columns = [TIME_COL] + sqz_column_names
                     new_sqz_data.set_index(TIME_COL, inplace=True)
-                    sqz_data = sqz_data.append(new_sqz_data)
+                    sqz_data = pd.concat((sqz_data, new_sqz_data))
 
                 # save checkpoint of data
                 sqz_data.to_csv(output_file_path)
