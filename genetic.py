@@ -85,15 +85,18 @@ def genetic_main(num_features, config):
     
     # run through generations of genetic algorithm
     for e in range(GENERATIONS):
+            # write the current row of members to the genetic data file
             if not loaded_save_file or e > 0:
                 with open(save_path, 'a') as file:
 
                     if loaded_save_file or e > 0:
                         file.write('\n')
 
+                    # write bitmasks for each member
                     for g in generation:
                         file.write(f'{bitmask_np2str(g)} ')
                     
+                    # write -1 (i.e. N/A loss) for each member
                     file.write(' '.join(['-1' for _ in generation]))
 
             # compute fitnesses
@@ -102,6 +105,8 @@ def genetic_main(num_features, config):
             while len((incomplete_jobs := list(
                             np.argwhere(losses == -1).flatten())
                     )) > 0:
+                # if this generation's jobs haven't been submitted or
+                # some jobs didn't successfully terminate
                 if (not jobs_submitted or 
                     os.popen(
                     f'sacct -j {job_id} | awk \'$5=="RUNNING" {{ print $0 }}\''
@@ -142,6 +147,16 @@ def genetic_main(num_features, config):
                     job_loss = np.mean(job_losses)
                     if not np.isnan(job_loss):
                         losses[j] = job_loss
+
+                        # delete loaded models if loss was successfully set
+                        if DELETE_MODELS:
+                            for i, (start, end) in enumerate(gps_ranges):
+                                job_file_path = Path(MODEL_SAVE_PATH_STUB.format(
+                                    bitmask_np2str(generation[j]),
+                                    start,
+                                    end
+                                    ))
+                                os.rmdir(job_file_path)
                 time.sleep(MAIN_POLL_PERIOD)
             fitness = (-losses).argsort().argsort()
 
@@ -178,8 +193,6 @@ def genetic_main(num_features, config):
             generation = new_generation
 
             losses = -np.ones(G)
-
-
 
 def genetic_sub(job_num, gps_ranges, num_features, config):
     '''
