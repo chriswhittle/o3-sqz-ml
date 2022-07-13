@@ -61,17 +61,54 @@ def train_model(save_path, sub_start_gps, sub_end_gps, processed_path,
     training_labels = training_features.pop('SQZ')
     validation_labels = validation_features.pop('SQZ')
 
+    # shape training data for LSTM
+    if neural_network['lstm_dim'] > 0:
+        training_features = training_features.reset_index().drop(
+            columns='gps_times')
+        training_labels = training_labels.reset_index().drop(
+            columns='gps_times')
+
+        training_dataset = tf.keras.preprocessing.timeseries_dataset_from_array(
+            data=training_features, targets=training_labels,
+            sequence_length=neural_network['lstm_lookback']
+        )
+
+        validation_features = validation_features.reset_index().drop(
+            columns='gps_times')
+        validation_labels = validation_labels.reset_index().drop(
+            columns='gps_times')
+
+        val_dataset = tf.keras.preprocessing.timeseries_dataset_from_array(
+            data=validation_features, targets=validation_labels,
+            sequence_length=neural_network['lstm_lookback']
+        )
+
     #### training the neural network
 
     # initialize model
     normalizer = preprocessing.Normalization()
     normalizer.adapt(np.array(training_features))
 
-    model = keras.Sequential([normalizer]
+    model = keras.Sequential(
+        (
+            [] if neural_network['lstm_dim'] == 0
+            # else [layers.Input(
+            #     shape=()
+            # )]
+            else [] #########
+        )
+        + [normalizer]
         + (
             [] if neural_network['rff_dim'] == 0
             else [layers.experimental.RandomFourierFeatures(
                 output_dim=neural_network['rff_dim']
+            )]
+        )
+        + (
+            [] if neural_network['lstm_dim'] == 0
+            else [layers.LSTM(
+                units=neural_network['lstm_dim'],
+                stateful=True
             )]
         )
         + [layers.Dense(neural_network['dense_dim'],
@@ -119,12 +156,20 @@ def train_model(save_path, sub_start_gps, sub_end_gps, processed_path,
             ] + ([TqdmCallback(verbose=0)] if is_verbose else []))
         
         # train model
-        model.fit(
-            training_features, training_labels,
-            validation_data=(validation_features, validation_labels),
-            verbose=is_verbose, epochs=neural_network['epochs'],
-            callbacks=callbacks_list, batch_size=batch_size
-        )
+        fit_args = {
+            'verbose': is_verbose,
+            'epochs': neural_network['epochs'],
+            'callbacks':callbacks_list,
+            'batch_size': batch_size
+        }
+        if neural_network['lstm_dim'] > 0:
+            model.fit(training_dataset, validation_data=val_dataset, **fit_args)
+        else:
+            model.fit(
+                training_features, training_labels,
+                validation_data=(validation_features, validation_labels),
+                **fit_args
+            )
 
         # save model
         model.save(output_file_path)

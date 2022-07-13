@@ -247,7 +247,7 @@ if __name__ == "__main__":
     ### set up variables for genetic run
 
     # show info messages
-    logging.basicConfig(level=logging.DEBUG) ### TODO SET TO INFO
+    logging.basicConfig(level=logging.INFO)
 
     # load config file given in command line
     with open(sys.argv[2]) as config_file:
