@@ -63,22 +63,36 @@ def genetic_main(num_features, config):
 
     logging.info('Starting main genetic algorithm loop...')
 
+    # initialize dictionary of already-calculated losses
+    past_losses = {}
+
     # load progress if already exists
     if save_path.is_file() and save_path.stat().st_size:
         logging.info(f'Loading progress from {save_path}...')
 
         with open(save_path) as file:
             for line in file:
-                prev_generation = line
+                # get subset bitmasks (first G elements) and
+                # losses (last G element)
+                generation = line.split(' ')
+                generation_members = generation[:G]
+                losses = np.array([float(l) for l in generation[G:]])
+                
+                # update dictionary of past losses with current row values
+                # (assuming the recorded loss != -1)
+                past_losses.update(
+                    [el for el in zip(generation_members, losses) if el[1] != -1]
+                )
             
-            prev_generation = prev_generation.split(' ')
-            generation = [bitmask_str2np(g, num_features) for g in prev_generation[:G]]
-            losses = np.array([float(l) for l in prev_generation[G:]])
-
+            # get numpy bitmasks for current generation
+            generation = [bitmask_str2np(g, num_features) for g in generation_members]
+        
         loaded_save_file = True
     # otherwise initialize first generation
     else:
+        # initialize first generation by generating G random bitmasks
         generation = [np.random.randint(0, 2, num_features) for _ in range(G)]
+        # initialize losses as -1 (i.e. uncomputed)
         losses = -np.ones(config['genetic']['pop_size'])
         save_path.touch()
         loaded_save_file = False
@@ -105,6 +119,24 @@ def genetic_main(num_features, config):
             while len((incomplete_jobs := list(
                             np.argwhere(losses == -1).flatten())
                     )) > 0:
+                # check whether any incomplete jobs have previous values stored
+                # in dictionary of previously-computed losses
+                jobs_recalled = [] # jobs that don't need to be re-calculated
+                for id in incomplete_jobs:
+                    bitmask_string = bitmask_np2str(generation[id])
+
+                    if bitmask_string in past_losses:
+                        # update loss using previously-calculated value
+                        losses[id] = past_losses[bitmask_string]
+
+                        # add current job ID to list of jobs that don't need
+                        # to be re-calculated
+                        jobs_recalled += [id]
+                
+                # mark jobs we just recalled as complete
+                for id in jobs_recalled:
+                    incomplete_jobs.remove(id)
+
                 # if this generation's jobs haven't been submitted or
                 # some jobs didn't successfully terminate
                 if (not jobs_submitted or 
@@ -146,7 +178,13 @@ def genetic_main(num_features, config):
                     
                     job_loss = np.mean(job_losses)
                     if not np.isnan(job_loss):
+                        # update record of current generation losses with
+                        # newly-computed loss
                         losses[j] = job_loss
+
+                        # update dictionary of previously-computed losses to
+                        # include new loss
+                        past_losses[bitmask_np2str(generation[j])] = job_loss
 
                         # delete loaded models if loss was successfully set
                         if DELETE_MODELS:
@@ -254,7 +292,7 @@ if __name__ == "__main__":
         config = yaml.load(config_file, yaml.FullLoader)
     
     # set save path and make if doesn't already exist
-    save_path = config['genetic_path']
+    save_path =Path( config['genetic_path'])
 
     # count number of feature channels (subtract channels to be cut)
     num_features = len(config['channels']) - len(config['cut_channels'])
@@ -265,7 +303,7 @@ if __name__ == "__main__":
             channels += [c]
 
     # define GPS ranges to test
-    ########### TODO UPDATE THIS LOGIC TO SOMETHING MORE SENSIBLE ?? ##########
+    ########### TODO: UPDATE THIS LOGIC TO SOMETHING MORE SENSIBLE ?? ##########
     MONTH = 3600*24*30
     RANGE_COUNT = 3
     start = config['start_gps']
