@@ -1,9 +1,7 @@
-import sys
 import logging
 from pathlib import Path
 import numpy as np
 
-import yaml
 import pandas as pd
 from tqdm.keras import TqdmCallback
 
@@ -15,18 +13,19 @@ from tensorflow.keras.layers.experimental import preprocessing
 
 LOSS_HISTORY_FILENAME = 'loss.txt'
 
-def train_model(save_path, sub_start_gps, sub_end_gps, processed_path,
-                nominal_blrms_lims, neural_network, cut_channels, channels,
-                val_fraction=0.2, val_start_gps=None, val_end_gps=None,
-                save_period=10, batch_size=512, **kwargs):
-    #### prepare data for training the neural network
+# TODO: add cluster logic
+## cluster stage -- saves cluster centroids to file in output path
+## saves models in subfolder of output path
+## method to estimate SQZ given input channels? will just use model if cluster=1,
+### otherwise do clustering interpolation;
+### should make this a class with train_model and compute/estimate methods
 
+# TODO: modify wherever train_model appears in .py
+
+def load_data(processed_path, nominal_blrms_lims, channels,
+                cut_channels, **kwargs):
     # load in data
     data = pd.read_csv(processed_path, index_col='gps_time')
-    
-    # create output file path if it does not exist
-    output_file_path = Path(save_path)
-    output_file_path.mkdir(exist_ok=True, parents=True)
 
     # remove other SQZ columns
     sqz_column = f'SQZ_dB {nominal_blrms_lims[0]}-{nominal_blrms_lims[1]}Hz'
@@ -43,143 +42,165 @@ def train_model(save_path, sub_start_gps, sub_end_gps, processed_path,
             readable_cut += [channels[c]]
     data.drop(readable_cut, axis=1, inplace=True)
 
-    # divide data into training and validation sets
-    if val_start_gps is None or val_end_gps is None:
-        # trim data to within given GPS times
-        data.drop(data[(data.index < sub_start_gps) 
-                        | (data.index > sub_end_gps)].index, inplace=True)
+    return data
 
-        split_ind = int((1-val_fraction) * len(data))
-        training_features = data.iloc[:split_ind]
-        validation_features = data.iloc[split_ind:]
-    else:
-        training_features = data.drop(data[(data.index < sub_start_gps) 
-                        |               (data.index > sub_end_gps)].index)
-        validation_features = data.drop(data[(data.index < val_start_gps) 
-                        |               (data.index > val_end_gps)].index)
-
-    training_labels = training_features.pop('SQZ')
-    validation_labels = validation_features.pop('SQZ')
-
-    # shape training data for LSTM
-    if neural_network['lstm_dim'] > 0:
-        training_features = training_features.reset_index().drop(
-            columns='gps_times')
-        training_labels = training_labels.reset_index().drop(
-            columns='gps_times')
-
-        training_dataset = tf.keras.preprocessing.timeseries_dataset_from_array(
-            data=training_features, targets=training_labels,
-            sequence_length=neural_network['lstm_lookback']
-        )
-
-        validation_features = validation_features.reset_index().drop(
-            columns='gps_times')
-        validation_labels = validation_labels.reset_index().drop(
-            columns='gps_times')
-
-        val_dataset = tf.keras.preprocessing.timeseries_dataset_from_array(
-            data=validation_features, targets=validation_labels,
-            sequence_length=neural_network['lstm_lookback']
-        )
-
-    #### training the neural network
-
-    # initialize model
-    normalizer = preprocessing.Normalization()
-    normalizer.adapt(np.array(training_features))
-
-    model = keras.Sequential(
-        (
-            [] if neural_network['lstm_dim'] == 0
-            # else [layers.Input(
-            #     shape=()
-            # )]
-            else [] #########
-        )
-        + [normalizer]
-        + (
-            [] if neural_network['rff_dim'] == 0
-            else [layers.experimental.RandomFourierFeatures(
-                output_dim=neural_network['rff_dim']
-            )]
-        )
-        + (
-            [] if neural_network['lstm_dim'] == 0
-            else [layers.LSTM(
-                units=neural_network['lstm_dim'],
-                stateful=True
-            )]
-        )
-        + [layers.Dense(neural_network['dense_dim'],
-                        activation=neural_network['activation'])
-            for _ in range(neural_network['dense_layers'])]
-        + [layers.Dense(1)]
-    )
-
-    model.compile(loss='mean_absolute_error',
-                  optimizer=tf.keras.optimizers.Adam(0.001))
-
-    loss_path = output_file_path / LOSS_HISTORY_FILENAME
-    if loss_path.is_file():
-        # load loss history from file
-        loss_history = np.loadtxt(loss_path, skiprows=1)
+class SQZModel:
+    def __init__(self, save_path, sub_start_gps, sub_end_gps, processed_path,
+                nominal_blrms_lims, neural_network, cut_channels, channels,
+                val_fraction=0.2, val_start_gps=None, val_end_gps=None,
+                save_period=10, batch_size=512, **kwargs):
+        #### prepare data for training the neural network
+        data = load_data(processed_path,
+                        nominal_blrms_lims,
+                        channels,
+                        cut_channels)
         
-        # load model weights from file
-        available_epochs = []
-        for checkpoint_file in output_file_path.glob('*.hdf5'):
-            available_epochs += [
-                int(str(checkpoint_file).split('-')[1].replace('.hdf5',''))
-            ]
+        # create output file path if it does not exist
+        output_file_path = Path(save_path)
+        output_file_path.mkdir(exist_ok=True, parents=True)
 
-        # if no checkpoints saved 
-        if len(available_epochs) == 0:
-            model = tf.saved_model.load(str(output_file_path))
+        # divide data into training and validation sets
+        if val_start_gps is None or val_end_gps is None:
+            # trim data to within given GPS times
+            data.drop(data[(data.index < sub_start_gps) 
+                            | (data.index > sub_end_gps)].index, inplace=True)
+
+            split_ind = int((1-val_fraction) * len(data))
+            training_features = data.iloc[:split_ind]
+            validation_features = data.iloc[split_ind:]
         else:
-            # use the lowest loss checkpoint
-            ckpt = available_epochs[np.argmin(
-                loss_history[np.minimum(
-                        available_epochs, neural_network['epochs']-1
-                    ), 1]
-                )]
-            
-            model.load_weights(output_file_path / f'checkpoint-{ckpt:04d}.hdf5')
-    else:
-        # set up callbacks for saving model checkpoints
-        steps_per_epoch = training_labels.size / batch_size
-        checkpoint_path = output_file_path / 'checkpoint-{epoch:04d}.hdf5'
-        is_verbose = logging.root.level <= logging.DEBUG
-        callbacks_list = ([
-            callbacks.ModelCheckpoint(checkpoint_path,
-                                    monitor='val_loss', verbose=is_verbose,
-                                    save_freq=int(save_period * steps_per_epoch))
-            ] + ([TqdmCallback(verbose=0)] if is_verbose else []))
-        
-        # train model
-        fit_args = {
-            'verbose': is_verbose,
-            'epochs': neural_network['epochs'],
-            'callbacks':callbacks_list,
-            'batch_size': batch_size
-        }
+            training_features = data.drop(data[(data.index < sub_start_gps) 
+                            |               (data.index > sub_end_gps)].index)
+            validation_features = data.drop(data[(data.index < val_start_gps) 
+                            |               (data.index > val_end_gps)].index)
+
+        training_labels = training_features.pop('SQZ')
+        validation_labels = validation_features.pop('SQZ')
+
+        # shape training data for LSTM
         if neural_network['lstm_dim'] > 0:
-            model.fit(training_dataset, validation_data=val_dataset, **fit_args)
-        else:
-            model.fit(
-                training_features, training_labels,
-                validation_data=(validation_features, validation_labels),
-                **fit_args
+            training_features = training_features.reset_index().drop(
+                columns='gps_time')
+            training_labels = training_labels.reset_index().drop(
+                columns='gps_time')
+
+            training_dataset = tf.keras.preprocessing.timeseries_dataset_from_array(
+                data=training_features, targets=training_labels,
+                sequence_length=neural_network['lstm_lookback']
             )
 
-        # save model
-        model.save(output_file_path)
+            validation_features = validation_features.reset_index().drop(
+                columns='gps_time')
+            validation_labels = validation_labels.reset_index().drop(
+                columns='gps_time')
 
-        # save loss history
-        loss_history = np.vstack((
-                            model.history.history['loss'],
-                            model.history.history['val_loss']
-                            )).T
-        np.savetxt(loss_path, loss_history,
-                   header='loss val_loss')
+            val_dataset = tf.keras.preprocessing.timeseries_dataset_from_array(
+                data=validation_features, targets=validation_labels,
+                sequence_length=neural_network['lstm_lookback']
+            )
 
-    return model, loss_history
+        #### training the neural network
+
+        # initialize model
+        normalizer = preprocessing.Normalization()
+        normalizer.adapt(np.array(training_features))
+
+        model = keras.Sequential(
+            (
+                [] if neural_network['lstm_dim'] == 0
+                # else [layers.Input(
+                #     shape=()
+                # )]
+                else [] #########
+            )
+            + [normalizer]
+            + (
+                [] if neural_network['rff_dim'] == 0
+                else [layers.experimental.RandomFourierFeatures(
+                    output_dim=neural_network['rff_dim']
+                )]
+            )
+            + (
+                [] if neural_network['lstm_dim'] == 0
+                else [layers.LSTM(
+                    units=neural_network['lstm_dim'],
+                    stateful=True
+                )]
+            )
+            + [layers.Dense(neural_network['dense_dim'],
+                            activation=neural_network['activation'])
+                for _ in range(neural_network['dense_layers'])]
+            + [layers.Dense(1)]
+        )
+
+        model.compile(loss='mean_absolute_error',
+                    optimizer=tf.keras.optimizers.Adam(0.001))
+
+        loss_path = output_file_path / LOSS_HISTORY_FILENAME
+        if loss_path.is_file():
+            # load loss history from file
+            loss_history = np.loadtxt(loss_path, skiprows=1)
+            
+            # load model weights from file
+            available_epochs = []
+            for checkpoint_file in output_file_path.glob('*.hdf5'):
+                available_epochs += [
+                    int(str(checkpoint_file).split('-')[1].replace('.hdf5',''))
+                ]
+
+            # if no checkpoints saved 
+            if len(available_epochs) == 0:
+                model = tf.saved_model.load(str(output_file_path))
+            else:
+                # use the lowest loss checkpoint
+                ckpt = available_epochs[np.argmin(
+                    loss_history[np.minimum(
+                            available_epochs, neural_network['epochs']-1
+                        ), 1]
+                    )]
+                
+                model.load_weights(output_file_path / f'checkpoint-{ckpt:04d}.hdf5')
+        else:
+            # set up callbacks for saving model checkpoints
+            steps_per_epoch = training_labels.size / batch_size
+            checkpoint_path = output_file_path / 'checkpoint-{epoch:04d}.hdf5'
+            is_verbose = logging.root.level <= logging.DEBUG
+            callbacks_list = ([
+                callbacks.ModelCheckpoint(checkpoint_path,
+                                        monitor='val_loss', verbose=is_verbose,
+                                        save_freq=int(save_period * steps_per_epoch))
+                ] + ([TqdmCallback(verbose=0)] if is_verbose else []))
+            
+            # train model
+            fit_args = {
+                'verbose': is_verbose,
+                'epochs': neural_network['epochs'],
+                'callbacks':callbacks_list,
+                'batch_size': batch_size
+            }
+            if neural_network['lstm_dim'] > 0:
+                model.fit(training_dataset, validation_data=val_dataset, **fit_args)
+            else:
+                model.fit(
+                    training_features, training_labels,
+                    validation_data=(validation_features, validation_labels),
+                    **fit_args
+                )
+
+            # save model
+            model.save(output_file_path)
+
+            # save loss history
+            loss_history = np.vstack((
+                                model.history.history['loss'],
+                                model.history.history['val_loss']
+                                )).T
+            np.savetxt(loss_path, loss_history,
+                    header='loss val_loss')
+
+        self.model = model
+        self.loss_history = loss_history
+
+    def estimate_sqz(self, features):
+        # TODO: cluster interpolation
+        return -self.model.predict(features).flatten()

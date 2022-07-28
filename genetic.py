@@ -8,7 +8,7 @@ import logging
 
 import numpy as np
 
-from train_nn import train_model
+from train_nn import SQZModel
 
 '''
 Functions for running genetic algorithm to feature select channels.
@@ -276,7 +276,7 @@ def genetic_sub(job_num, gps_ranges, num_features, config):
                     ))
 
         # run training
-        train_model(job_file, start, end, save_period=200,
+        SQZModel(job_file, start, end, save_period=200,
                     batch_size=4096, **config)
 
 if __name__ == "__main__":
