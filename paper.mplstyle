@@ -1,0 +1,9 @@
+figure.figsize: 14, 7
+
+axes.xmargin: 0
+
+font.size: 12
+font.family: "serif"
+font.serif: ["Computer Modern Serif"]
+
+text.usetex: True
