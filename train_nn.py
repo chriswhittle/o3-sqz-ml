@@ -47,6 +47,7 @@ class SQZModel:
                 val_fraction=0.2, val_start_gps=None, val_end_gps=None,
                 save_period=10, batch_size=512, cluster_count=1,
                 interpolate=True, **kwargs):
+        # save_path = None => nothing saved
         ###################################################
         #### prepare data for training the neural network
         data = load_data(processed_path,
@@ -58,8 +59,9 @@ class SQZModel:
         #### prepare data for model training
         
         # create output file path if it does not exist
-        output_file_path = Path(save_path)
-        output_file_path.mkdir(exist_ok=True, parents=True)
+        if save_path is not None:
+            output_file_path = Path(save_path)
+            output_file_path.mkdir(exist_ok=True, parents=True)
 
         # divide data into training and validation sets
         if val_start_gps is None or val_end_gps is None:
@@ -110,7 +112,9 @@ class SQZModel:
         #### compute clusters
 
         # try to load detrending properties
-        if (output_file_path / self.DETREND_VALUES_FILENAME).is_file():
+        if (save_path is not None and 
+            (output_file_path / self.DETREND_VALUES_FILENAME).is_file()
+        ):
             aux_values = np.loadtxt(
                 output_file_path / self.DETREND_VALUES_FILENAME
             )
@@ -123,10 +127,11 @@ class SQZModel:
             aux_std = training_features.std()
 
             # save detrending values for loading later on
-            np.savetxt(
-                output_file_path / self.DETREND_VALUES_FILENAME,
-                np.vstack( (aux_mean, aux_std) )
-            )
+            if save_path is not None:
+                np.savetxt(
+                    output_file_path / self.DETREND_VALUES_FILENAME,
+                    np.vstack( (aux_mean, aux_std) )
+                )
 
         # define detrending functions
         self.detrend = lambda d: (d - aux_mean) / aux_std
@@ -136,7 +141,9 @@ class SQZModel:
         norm_data = self.detrend(training_features)
 
         # try to load cluster centroids
-        if (output_file_path / self.CLUSTERS_FILENAME).is_file():
+        if (save_path is not None and 
+            (output_file_path / self.CLUSTERS_FILENAME).is_file()
+        ):
             # load cluster centers from file (use first column as cluster IDs)
             self.clusters = pd.read_csv(
                 output_file_path / self.CLUSTERS_FILENAME,
@@ -160,12 +167,13 @@ class SQZModel:
                 norm_data
             )
             
-            # save cluster centers
             self.clusters = pd.DataFrame(self.kmeans.cluster_centers_, columns=norm_data.columns)
-            self.clusters.to_csv(output_file_path / self.CLUSTERS_FILENAME)
+            if save_path is not None:
+                # save cluster centers
+                self.clusters.to_csv(output_file_path / self.CLUSTERS_FILENAME)
 
-            # save de-normalized cluster centers
-            self.retrend(self.clusters).to_csv(output_file_path / self.CLUSTERS_ABS_FILENAME)
+                # save de-normalized cluster centers
+                self.retrend(self.clusters).to_csv(output_file_path / self.CLUSTERS_ABS_FILENAME)
 
             # use labels allocated during k-means for the training labels
             training_clusters = self.kmeans.labels_
@@ -240,15 +248,16 @@ class SQZModel:
             ####################
             # train/load model
 
-            # create subfolder for this sub-network if it doesn't exist
-            sub_output_path = output_file_path / f'cluster_{i}'
-            sub_output_path.mkdir(exist_ok=True, parents=True)
+            if save_path is not None:
+                # create subfolder for this sub-network if it doesn't exist
+                sub_output_path = output_file_path / f'cluster_{i}'
+                sub_output_path.mkdir(exist_ok=True, parents=True)
 
-            # check if loss history exists
-            loss_path = sub_output_path / self.LOSS_HISTORY_FILENAME
+                # check if loss history exists
+                loss_path = sub_output_path / self.LOSS_HISTORY_FILENAME
 
             # if loss file exists (and model was already trained)
-            if loss_path.is_file():
+            if save_path is not None and loss_path.is_file():
                 # load loss history from file
                 loss_history = np.loadtxt(loss_path, skiprows=1)
                 
@@ -273,17 +282,23 @@ class SQZModel:
                     model.load_weights(sub_output_path / f'checkpoint-{ckpt:04d}.hdf5')
             # if loss file doesn't exist and model needs to be trained
             else:
-                # set up callbacks for saving model checkpoints
-                steps_per_epoch = max(
-                    sub_training_labels.size / batch_size, 1
-                )
-                checkpoint_path = sub_output_path / 'checkpoint-{epoch:04d}.hdf5'
+                # set verbosity level for training
                 is_verbose = logging.root.level <= logging.DEBUG
-                callbacks_list = ([
-                    callbacks.ModelCheckpoint(checkpoint_path,
-                                            monitor='val_loss', verbose=is_verbose,
-                                            save_freq=int(save_period * steps_per_epoch))
-                    ] + ([TqdmCallback(verbose=0)] if is_verbose else []))
+
+                # set up callbacks for saving model checkpoints
+                if save_path is None:
+                    callbacks_list = []
+                else:
+                    steps_per_epoch = max(
+                        sub_training_labels.size / batch_size, 1
+                    )
+                    checkpoint_path = sub_output_path / 'checkpoint-{epoch:04d}.hdf5'
+                    
+                    callbacks_list = ([
+                        callbacks.ModelCheckpoint(checkpoint_path,
+                                                monitor='val_loss', verbose=is_verbose,
+                                                save_freq=int(save_period * steps_per_epoch))
+                        ] + ([TqdmCallback(verbose=0)] if is_verbose else []))
                 
                 # train model
                 fit_args = {
@@ -308,7 +323,8 @@ class SQZModel:
                     )
 
                 # save model
-                model.save(sub_output_path)
+                if save_path is not None:
+                    model.save(sub_output_path)
 
                 # save loss history
                 cur_loss = model.history.history['loss']
@@ -318,15 +334,18 @@ class SQZModel:
                                     if sub_validation_exists else
                                     np.zeros( len(cur_loss) )
                                     )).T
-                np.savetxt(loss_path, loss_history,
-                        header='loss val_loss')
+                if save_path is not None:
+                    np.savetxt(loss_path, loss_history,
+                            header='loss val_loss')
 
             self.models[i] = model
             self.loss_histories[i] = loss_history
         
         # save averaged losses to file:
-        avg_loss_filepath = output_file_path / self.LOSS_HISTORY_FILENAME
-        if not avg_loss_filepath.is_file():
+        if save_path is not None:
+            avg_loss_filepath = output_file_path / self.LOSS_HISTORY_FILENAME
+        
+        if save_path is None or not avg_loss_filepath.is_file():
             self.loss_history_avg = np.zeros(self.loss_histories[0].shape)
             # 1) training loss is just the average of individual losses weighted by
             # number of data points associated with each cluster
@@ -347,11 +366,12 @@ class SQZModel:
             # models (as in the estimate_sqz function), but this would require
             # reloading models from each epoch and performing interpolation.
 
-            np.savetxt(
-                output_file_path / self.LOSS_HISTORY_FILENAME,
-                self.loss_history_avg,
-                header='loss val_loss'
-            )
+            if save_path is not None:
+                np.savetxt(
+                    avg_loss_filepath,
+                    self.loss_history_avg,
+                    header='loss val_loss'
+                )
 
     def estimate_sqz(self, features):
         # detrend data
