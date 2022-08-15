@@ -14,19 +14,22 @@ from train_nn import SQZModel
 Functions for running genetic algorithm to feature select channels.
 
 run with:
-`python genetic.py main config.yaml` for the main loop
+`python genetic.py main config.yaml 100` for the main loop (and 100 iterations)
 `python genetic.py $jobId config.yaml` for the jobs
 '''
 
 # get path to source directory
 source_directory = Path(os.path.dirname(os.path.abspath(__file__)))
 
-# format for trained model paths (subset, gps_start, gps_end)
-MODEL_SAVE_PATH_STUB = 'genetic/{}_{}-{}'
-DELETE_MODELS = True
-
 # poll job statuses every X seconds
 MAIN_POLL_PERIOD = 5
+SUB_POLL_PERIOD = 10
+
+# path for job loss results
+JOB_LOSS_PATH = 'genetic/job_{}.txt'
+
+# yet-to-be-computed loss value
+NULL_LOSS = -1
 
 def bitmask_str2np(s, fill=None):
     '''
@@ -43,7 +46,7 @@ def bitmask_np2str(a):
     '''
     return str(int(''.join([str(c) for c in list(a)]), 2))
 
-def genetic_main(num_features, config):
+def genetic_main(num_features, num_iter, config):
     '''
     Main loop for handling generations of the genetic algorithm.
     Interacts with SLURM to launch individual jobs in each generation.
@@ -52,7 +55,7 @@ def genetic_main(num_features, config):
     G = config['genetic']['pop_size'] # number of members in each generation
     G_SELECT = G//2 # how many members to use for selection
     G_CHILD = 2 * G // G_SELECT # number of children for each pair
-    GENERATIONS = config['genetic']['generations'] # number of iterations to run
+    GENERATIONS = num_iter # number of iterations to run
     M_RATE = 1/num_features # mutation rate
 
     # paths and template for submit scripts
@@ -79,9 +82,9 @@ def genetic_main(num_features, config):
                 losses = np.array([float(l) for l in generation[G:]])
                 
                 # update dictionary of past losses with current row values
-                # (assuming the recorded loss != -1)
+                # (assuming the recorded loss != uncomputed)
                 past_losses.update(
-                    [el for el in zip(generation_members, losses) if el[1] != -1]
+                    [el for el in zip(generation_members, losses) if el[1] != NULL_LOSS]
                 )
             
             # get numpy bitmasks for current generation
@@ -92,166 +95,163 @@ def genetic_main(num_features, config):
     else:
         # initialize first generation by generating G random bitmasks
         generation = [np.random.randint(0, 2, num_features) for _ in range(G)]
-        # initialize losses as -1 (i.e. uncomputed)
-        losses = -np.ones(config['genetic']['pop_size'])
+        # initialize losses to uncomputed values
+        losses = np.ones(G) * NULL_LOSS
         save_path.touch()
         loaded_save_file = False
     
     # run through generations of genetic algorithm
+    jobs_submitted = False
     for e in range(GENERATIONS):
-            # write the current row of members to the genetic data file
-            if not loaded_save_file or e > 0:
-                with open(save_path, 'a') as file:
+        logging.debug(f'Main thread starting generation {e}...')
+        # write the current row of members to the genetic data file
+        if not loaded_save_file or e > 0:
+            with open(save_path, 'a') as file:
 
-                    if loaded_save_file or e > 0:
-                        file.write('\n')
+                if loaded_save_file or e > 0:
+                    file.write('\n')
 
-                    # write bitmasks for each member
-                    for g in generation:
-                        file.write(f'{bitmask_np2str(g)} ')
-                    
-                    # write -1 (i.e. N/A loss) for each member
-                    file.write(' '.join(['-1' for _ in generation]))
-
-            # compute fitnesses
-            jobs_submitted = False
-
-            while len((incomplete_jobs := list(
-                            np.argwhere(losses == -1).flatten())
-                    )) > 0:
-                # check whether any incomplete jobs have previous values stored
-                # in dictionary of previously-computed losses
-                jobs_recalled = [] # jobs that don't need to be re-calculated
-                for id in incomplete_jobs:
-                    bitmask_string = bitmask_np2str(generation[id])
+                # write bitmasks for each member
+                initial_losses = [NULL_LOSS for _ in generation]
+                for i, g in enumerate(generation): # bitmask_string in past_losses
+                    bitmask_string = bitmask_np2str(g)
+                    file.write(f'{bitmask_string} ')
 
                     if bitmask_string in past_losses:
-                        # update loss using previously-calculated value
-                        losses[id] = past_losses[bitmask_string]
-
-                        # add current job ID to list of jobs that don't need
-                        # to be re-calculated
-                        jobs_recalled += [id]
+                        initial_losses[i] = past_losses[bitmask_string]
                 
-                # mark jobs we just recalled as complete
-                for id in jobs_recalled:
-                    incomplete_jobs.remove(id)
+                # write losses for each member (some marked as uncomputed)
+            file.write(' '.join(map(str, initial_losses)))
 
-                # if this generation's jobs haven't been submitted or
-                # some jobs didn't successfully terminate
-                if (not jobs_submitted or 
-                    os.popen(
-                    f'sacct -j {job_id} | awk \'$5=="RUNNING" {{ print $0 }}\''
-                    ).read() == ''):
-                    # new submit file containing incomplete job numbers
-                    with open(submit_path, 'w') as file:
-                        file.write(submit_stub.replace(
-                            '[JOB_IDS]',
-                            ','.join(map(str, list(incomplete_jobs)))
-                        ))
-                    # submit new jobs
-                    job_id = (os.popen(f'LLsub {submit_path}')
-                              .read().split(' ')[-1]).replace('\n', '')
-                    jobs_submitted = True
+        # launch jobs (only done once) when loss file has been written
+        if not jobs_submitted:
+            # new submit file containing incomplete job numbers
+            logging.debug(f'Writing submit file to {submit_path}')
+            with open(submit_path, 'w') as file:
+                file.write(submit_stub.replace(
+                    '[JOB_IDS]',
+                    ','.join(map(str, np.arange(G)))
+                ))
 
-                # try to grab losses from finished jobs
-                for j in incomplete_jobs:
-                    job_losses = np.zeros(len(gps_ranges))
-                    for i, (start, end) in enumerate(gps_ranges):
-                        job_file = Path(MODEL_SAVE_PATH_STUB.format(
-                            bitmask_np2str(generation[j]),
-                            start,
-                            end
-                        )) / 'loss.txt'
-                        if job_file.is_file():
-                            model_losses_loaded = False
-                            while not model_losses_loaded:
-                                try:
-                                    model_losses = np.loadtxt(job_file,
-                                                              skiprows=1)
-                                    model_losses_loaded = True
-                                except StopIteration:
-                                    logging.info('Retrying loss load...')
-                            job_losses[i] = np.min(model_losses[:,1])
-                        else:
-                            job_losses[i] = np.nan
+            logging.debug('Submitting jobs')
+            # start jobs and save job ID
+            job_id = (os.popen(f'LLsub {submit_path}')
+                        .read().split(' ')[-1]).replace('\n', '')
+            jobs_submitted = True
+
+        # periodically poll jobs to check loss values
+        calc_incomplete = lambda l: list(np.argwhere(l == NULL_LOSS).flatten())
+        incomplete_jobs = calc_incomplete(losses)
+        while len(incomplete_jobs) > 0:
+            # check over each job that hasn't finished computing
+            for j in incomplete_jobs:
+                # check job file that will save the loss
+                job_file = Path(JOB_LOSS_PATH.format(j))
+                if job_file.is_file():
+                    # load in loss (float representing the averaged loss over
+                    # all GPS segments)
+                    losses[j] = float(np.loadtxt(job_file))
+                    # delete job loss file
+                    os.remove(job_file)
                     
-                    job_loss = np.mean(job_losses)
-                    if not np.isnan(job_loss):
-                        # update record of current generation losses with
-                        # newly-computed loss
-                        losses[j] = job_loss
-
-                        # update dictionary of previously-computed losses to
-                        # include new loss
-                        past_losses[bitmask_np2str(generation[j])] = job_loss
-
-                        # delete loaded models if loss was successfully set
-                        if DELETE_MODELS:
-                            for i, (start, end) in enumerate(gps_ranges):
-                                job_file_path = Path(MODEL_SAVE_PATH_STUB.format(
-                                    bitmask_np2str(generation[j]),
-                                    start,
-                                    end
-                                    ))
-                                os.rmdir(job_file_path)
-                time.sleep(MAIN_POLL_PERIOD)
-            fitness = (-losses).argsort().argsort()
-
-            # write losses to file
-            with open(save_path) as file:
-                lines = file.readlines()
-            with open(save_path, 'w') as file:
-                for l in lines[:-1]:
-                    file.write(l)
-
-                for g in generation:
-                    file.write(f'{bitmask_np2str(g)} ')
-                
-                file.write(' '.join([str(l) for l in losses]))
+                    # save this loss in the dictionary of past losses computed
+                    past_losses[bitmask_np2str(generation[j])] = losses[j]
             
-            # selection
-            selection = np.random.choice(np.arange(G), G_SELECT, replace=False,
-                                         p=fitness/np.sum(fitness))
+            incomplete_jobs = calc_incomplete(losses)
+            time.sleep(MAIN_POLL_PERIOD)
+        
+        # convert losses to fitnesses by sorting then using index as fitness
+        fitness = (-losses).argsort().argsort()
 
-            # crossover
-            new_generation = []
-            for i in range(0, len(selection), 2):
-                for j in range(G_CHILD):
-                    new_subset = [0]*num_features
-                    for k in range(num_features):
-                        # mutate
-                        if np.random.random() < M_RATE:
-                            new_subset[k] = np.random.randint(0, 2)
-                        # combine
-                        else:
-                            choice = np.random.random() < 0.5
-                            new_subset[k] = generation[selection[i+choice]][k]
-                    new_generation += [new_subset]
-            generation = new_generation
+        # rewrite file with new losses in last line
+        with open(save_path) as file:
+            lines = file.readlines()
+        with open(save_path, 'w') as file:
+            for l in lines[:-1]:
+                file.write(l)
 
-            losses = -np.ones(G)
+            # write generation bitmasks
+            for g in generation:
+                file.write(f'{bitmask_np2str(g)} ')
+            
+            # write newly-computed losses
+            file.write(' '.join([str(l) for l in losses]))
+        
+        # selection
+        selection = np.random.choice(np.arange(G), G_SELECT, replace=False,
+                                        p=fitness/np.sum(fitness))
+
+        # crossover
+        new_generation = []
+        for i in range(0, len(selection), 2):
+            for j in range(G_CHILD):
+                new_subset = [0]*num_features
+                for k in range(num_features):
+                    # mutate
+                    if np.random.random() < M_RATE:
+                        new_subset[k] = np.random.randint(0, 2)
+                    # combine
+                    else:
+                        choice = np.random.random() < 0.5
+                        new_subset[k] = generation[selection[i+choice]][k]
+                new_generation += [new_subset]
+        generation = new_generation
+
+        losses = -np.ones(G)
+
+    # kill jobs and remove submit file
+    logging.debug(f'Killing job {job_id}...')
+    os.popen(f'LLkill {job_id}')
+    os.remove(submit_path)
 
 def genetic_sub(job_num, gps_ranges, num_features, config):
     '''
-    Function for launching training of an individual member of a generation.
+    Function for launching new training of individual generation members.
+    '''
+    G = config['genetic']['pop_size']
+    job_file = JOB_LOSS_PATH.format(job_num)
+
+    # job loops until killed by main job or has trained enough models
+    models_trained = 0
+    while models_trained < G:
+        # load latest row in genetic algorithm history file
+        with open(save_path) as file:
+            for line in file:
+                prev_generation = line
+                
+            prev_generation = prev_generation.split(' ')
+
+        # if the loss recorded for this job's current row is uncomputed,
+        # start training on this subset (assuming the loss hasn't already been
+        # recorded)
+        if (float(prev_generation[job_num + G]) < 0 and not job_file.is_file()):
+            # use job number to get the allocated bitmask (channel subset)
+            # for this job (as a numpy array)
+            current_bitmask_str = prev_generation[job_num]
+            current_bitmask = bitmask_str2np(current_bitmask_str, num_features)
+    
+            # execute training
+            avg_loss = genetic_job(current_bitmask, gps_ranges,
+                                    num_features, config)
+
+            # save average minimum loss to the output file for this job
+            with open(job_file, 'w') as file:
+                file.write(f'{avg_loss}')
+            models_trained += 1
+
+        time.sleep(SUB_POLL_PERIOD)
+
+def genetic_job(bitmask, gps_ranges, num_features, config):
+    '''
+    Function for training of an individual member of a generation.
 
     job_num = ID of job, indexes to bitmask and loss in genetic algorithm
     history file
     gps_ranges = list of tuples corresponding to starts and ends of GPS
     segments to use for calculating loss
-    '''
-    # load latest row in genetic algorithm history file
-    with open(save_path) as file:
-        for line in file:
-            prev_generation = line
-            
-        prev_generation = prev_generation.split(' ')
 
-        # use job number to get the allocated bitmask (channel subset)
-        # for this job (as a numpy array)
-        current_bitmask_str = prev_generation[job_num]
-        current_bitmask = bitmask_str2np(current_bitmask_str, num_features)
+    Returns average loss of model over GPS segments.
+    '''
         
     # modify neural network config based on genetic-specific settings
     for key, value in config['genetic_network'].items():
@@ -260,24 +260,26 @@ def genetic_sub(job_num, gps_ranges, num_features, config):
 
     # specify channels to be cut based on the bitmask read
     config['cut_channels'] = [
-        c for i, c in enumerate(channels) if current_bitmask[i]==0
+        c for i, c in enumerate(channels) if bitmask[i]==0
     ]
 
     logging.debug(f"{len(config['cut_channels'])} channels cut")
-    assert(len(config['cut_channels']) == num_features - current_bitmask.sum())
+    assert(len(config['cut_channels']) == num_features - bitmask.sum())
 
     # iterate over each GPS segment to test
-    for start, end in gps_ranges:
-        # create path to model based on bitmask and GPS segment boundaries
-        job_file = Path(MODEL_SAVE_PATH_STUB.format(
-                        current_bitmask_str,
-                        start,
-                        end
-                    ))
-
-        # run training
-        SQZModel(job_file, start, end, save_period=200,
+    min_losses = np.zeros(len(gps_ranges))
+    for i, (start, end) in enumerate(gps_ranges):
+        # run training (without saving models)
+        model = SQZModel(None, start, end, save_period=200,
                     batch_size=4096, **config)
+
+        # grab minimum validation loss from this GPS segment
+        min_losses[i] = model.loss_history_avg[:,1].min()
+    
+    # calculate average minimum loss of the GPS segments
+    avg_loss = np.mean(min_losses)
+
+    return avg_loss
 
 if __name__ == "__main__":
 
@@ -302,13 +304,8 @@ if __name__ == "__main__":
         if c not in config['cut_channels']:
             channels += [c]
 
-    # define GPS ranges to test
-    ########### TODO: UPDATE THIS LOGIC TO SOMETHING MORE SENSIBLE ?? ##########
-    MONTH = 3600*24*30
-    RANGE_COUNT = 3
-    start = config['start_gps']
-    gps_ranges = [(start + i*MONTH, start + (i+1)*MONTH)
-                    for i in range(RANGE_COUNT)]
+    # retrieve GPS ranges to be used for tests
+    gps_ranges = config['genetic']['gps_ranges']
 
     ############################################################
 
@@ -318,7 +315,7 @@ if __name__ == "__main__":
     if sys.argv[1] == 'main':
         # main job for submitting member jobs and analyzing results
         logging.info(f'Starting job manager...')
-        genetic_main(num_features, config)
+        genetic_main(num_features, int(sys.argv[3]), config)
     else:
         # individual generation member job
 
