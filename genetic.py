@@ -66,6 +66,7 @@ def genetic_main(num_features, num_iter, config):
     
     # set save path and make if doesn't already exist
     save_path = Path(config['genetic_path'])
+    save_path.parent.mkdir(exist_ok=True, parents=True)
 
     logging.info('Starting main genetic algorithm loop...')
 
@@ -124,7 +125,7 @@ def genetic_main(num_features, num_iter, config):
                         initial_losses[i] = past_losses[bitmask_string]
                 
                 # write losses for each member (some marked as uncomputed)
-            file.write(' '.join(map(str, initial_losses)))
+                file.write(' '.join(map(str, initial_losses)))
 
         # launch jobs (only done once) when loss file has been written
         if not jobs_submitted:
