@@ -63,6 +63,9 @@ def genetic_main(num_features, num_iter, config):
     submit_path = Path('genetic/genetic.sh')
     with open(submit_stub_path) as file:
         submit_stub = file.read()
+    
+    # set save path and make if doesn't already exist
+    save_path = Path(config['genetic_path'])
 
     logging.info('Starting main genetic algorithm loop...')
 
@@ -129,9 +132,13 @@ def genetic_main(num_features, num_iter, config):
             logging.debug(f'Writing submit file to {submit_path}')
             with open(submit_path, 'w') as file:
                 file.write(submit_stub.replace(
-                    '[JOB_IDS]',
-                    ','.join(map(str, np.arange(G)))
-                ))
+                        '[JOB_IDS]', f'0-{G}'
+                    ).replace(
+                        '[SCRIPT_NAME]', os.path.basename(__file__)
+                    ).replace(
+                        '[SCRIPT_ARGS]', ''
+                    )
+                )
 
             logging.debug('Submitting jobs')
             # start jobs and save job ID
@@ -215,7 +222,7 @@ def genetic_sub(job_num, gps_ranges, num_features, config):
     models_trained = 0
     while models_trained < G:
         # load latest row in genetic algorithm history file
-        with open(save_path) as file:
+        with open(config['genetic_path']) as file:
             for line in file:
                 prev_generation = line
                 
@@ -292,9 +299,6 @@ if __name__ == "__main__":
     # load config file given in command line
     with open(sys.argv[2]) as config_file:
         config = yaml.load(config_file, yaml.FullLoader)
-    
-    # set save path and make if doesn't already exist
-    save_path =Path( config['genetic_path'])
 
     # count number of feature channels (subtract channels to be cut)
     num_features = len(config['channels']) - len(config['cut_channels'])

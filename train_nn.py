@@ -42,6 +42,14 @@ class SQZModel:
     CLUSTERS_FILENAME = 'clusters.csv'
     CLUSTERS_ABS_FILENAME = 'clusters_abs.csv'
 
+    def save_avg_loss(self, save_path):
+        np.savetxt(
+            save_path,
+            self.loss_history_avg,
+            header='loss val_loss'
+        )
+
+
     def __init__(self, save_path, sub_start_gps, sub_end_gps, processed_path,
                 nominal_blrms_lims, neural_network, cut_channels, channels,
                 val_fraction=0.2, val_start_gps=None, val_end_gps=None,
@@ -64,6 +72,8 @@ class SQZModel:
             output_file_path.mkdir(exist_ok=True, parents=True)
 
         # divide data into training and validation sets
+        sub_start_gps = int(sub_start_gps)
+        sub_end_gps = int(sub_end_gps)
         if val_start_gps is None or val_end_gps is None:
             # trim data to within given GPS times
             data.drop(data[(data.index < sub_start_gps) 
@@ -152,6 +162,7 @@ class SQZModel:
 
             # initialize kmeans object for labeling, but instead manually
             # set cluster centers
+            cluster_count = int(cluster_count)
             self.kmeans = KMeans(
                 n_clusters=cluster_count, random_state=0, max_iter=1
             ).fit(self.clusters)
@@ -367,11 +378,7 @@ class SQZModel:
             # reloading models from each epoch and performing interpolation.
 
             if save_path is not None:
-                np.savetxt(
-                    avg_loss_filepath,
-                    self.loss_history_avg,
-                    header='loss val_loss'
-                )
+                self.save_avg_loss(avg_loss_filepath)
 
     def estimate_sqz(self, features):
         # detrend data
