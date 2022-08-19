@@ -219,7 +219,7 @@ def genetic_sub(job_num, gps_ranges, num_features, config):
     Function for launching new training of individual generation members.
     '''
     G = config['genetic']['pop_size']
-    job_file = JOB_LOSS_PATH.format(job_num)
+    job_file = Path(JOB_LOSS_PATH.format(job_num))
 
     # job loops until killed by main job or has trained enough models
     models_trained = 0
@@ -241,6 +241,7 @@ def genetic_sub(job_num, gps_ranges, num_features, config):
             current_bitmask = bitmask_str2np(current_bitmask_str, num_features)
     
             # execute training
+            logging.debug(f'Running training for {current_bitmask_str}')
             avg_loss = genetic_job(current_bitmask, gps_ranges,
                                     num_features, config)
 
