@@ -173,6 +173,10 @@ def genetic_main(num_features, num_iter, config):
         # convert losses to fitnesses by sorting then using index as fitness
         fitness = (-losses).argsort().argsort()
 
+        # clean up remaining job files
+        for p in Path('.').glob('genetic/job_{}.txt'.format('*')):
+            p.unlink()
+
         # rewrite file with new losses in last line
         with open(save_path) as file:
             lines = file.readlines()
