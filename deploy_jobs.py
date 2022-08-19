@@ -23,14 +23,28 @@ OR
 If the jobs should be lightweight (i.e. don't save the models), add a --light flag at the end.
 '''
 
+# label for special 'duration' parameter
+DURATION_LABEL = 'duration'
+
 # get path to source directory
 source_directory = Path(os.path.dirname(os.path.abspath(__file__)))
 
 # path for submit script
 SUBMIT_FILENAME = 'batch.sh'
-
 # filename for parameter able
 PARAM_FILENAME = 'params.txt'
+
+def build_span(span):
+    '''
+    Takes dictionary with values or start/end/count keys and returns list of
+    parameter values.
+    '''
+    if 'values' in span:
+        return span['values']
+    else:
+        return np.linspace(float(span['start']),
+                            float(span['end']),
+                            int(span['count']))
 
 def deploy_aux(job_params, config_spans):
     '''
@@ -46,12 +60,7 @@ def deploy_aux(job_params, config_spans):
 
     # build current span
     cur_span = config_spans[0]
-    if 'values' in cur_span:
-        span = cur_span['values']
-    else:
-        span = np.linspace(float(cur_span['start']),
-                            float(cur_span['end']),
-                            int(cur_span['count']))
+    span = build_span(cur_span)
 
     # outer product between passed list of job params and new span
     new_job_params = []
@@ -85,9 +94,50 @@ def deploy(save_path, lightweight, config_spans, config):
     save_path = Path(save_path)
     save_path.mkdir(exist_ok=True, parents=True)
 
+    # initialize list of individual job parameters
+    init_config_spans = [{}]
+
+    #### handle custom span for `duration`
+    # duration = fraction of full time segment to use for training
+    duration_check = [c['param'] == DURATION_LABEL for c in config_spans]
+    if any(duration_check):
+        # build span of duration values
+        duration_ind = np.argmax(duration_check)
+        duration_values = [
+            float(f) for f in build_span(config_spans[duration_ind])
+        ]
+
+        # full segment length from which we take sub segments
+        full_segment_length = config['end_gps'] - config['start_gps']
+
+        # iterate over duration fractions and build segment start/end GPS times
+        init_config_spans = []
+        for f in duration_values:
+            # iterate over all fractions of full segment
+            for start_f in np.arange(0, 1, f):
+                # starting GPS timestamp
+                sub_start_gps = int(
+                    config['start_gps'] + full_segment_length * start_f
+                )
+
+                # save GPS start and end timestamps
+                init_config_spans += [{
+                    'duration': f,
+                    'sub_start_gps': sub_start_gps,
+                    'sub_end_gps': sub_start_gps + int(full_segment_length * f)
+                }]
+
+        # remove duration config span
+        config_spans.pop(duration_ind)
+        print(duration_values)
+
+    print(init_config_spans)
+
     #### build parameter spans
-    job_params = deploy_aux([{}], config_spans)
+    job_params = deploy_aux(init_config_spans, config_spans)
     num_jobs = len(job_params)
+
+    logging.info(f'Built parameters for {num_jobs} jobs')
 
     # write jobs and parameters to file
     parameter_table_path = save_path / PARAM_FILENAME
@@ -113,7 +163,7 @@ def deploy(save_path, lightweight, config_spans, config):
             ).replace(
                 '[SCRIPT_NAME]', os.path.basename(__file__)
             ).replace(
-                '[SCRIPT_ARGS]', save_path + ' --light' if lightweight else ''
+                '[SCRIPT_ARGS]', str(save_path) + ' --light' if lightweight else ''
             )
         )
     
@@ -140,6 +190,7 @@ def sub_job(save_path, lightweight, job_num, config):
                 ))
     
     # update config file with new values
+    # TODO: handle parameters that are in nested dictionaries
     config.update(job_params)
 
     # if sub GPS start/end is not specified, set to full segment
@@ -147,11 +198,15 @@ def sub_job(save_path, lightweight, job_num, config):
         if f'sub_{l}' not in config:
             logging.warning(f'No sub_{l} given in job specification.')
             config[f'sub_{l}'] = config[l]
+        
+    # training parameters for batch deployment
+    config['save_period'] = 200
+    config['batch_size'] = 4096
 
     # train model
-    model = SQZModel(None if lightweight else save_path / f'model_{job_num}',
-                    config['sub_start_gps'], config['sub_end_gps'],
-                    save_period=200, batch_size=4096, **config)
+    model = SQZModel(
+        None if lightweight else save_path / f'model_{job_num}', **config
+    )
 
     # if not saving model, save loss values
     if lightweight:
