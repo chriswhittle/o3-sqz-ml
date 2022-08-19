@@ -1,3 +1,4 @@
+from cmath import e
 import sys
 import os
 from pathlib import Path
@@ -137,6 +138,12 @@ def deploy(save_path, lightweight, config_spans, config):
     job_params = deploy_aux(init_config_spans, config_spans)
     num_jobs = len(job_params)
 
+    # fix parameter values to ints according to config values
+    for job in job_params:
+        for p in job:
+            if p in config and isinstance(config[p], int):
+                job[p] = int(job[p])
+
     logging.info(f'Built parameters for {num_jobs} jobs')
 
     # write jobs and parameters to file
@@ -188,6 +195,12 @@ def sub_job(save_path, lightweight, job_num, config):
                 job_params = dict(zip(
                     line_params[1::2], line_params[2::2]
                 ))
+    
+    # fix types based on type of value in config file
+    for p in job_params:
+        for type in [float, int]:
+            if p in config and isinstance(config[p], type):
+                job_params[p] = type(job_params[p])
     
     # update config file with new values
     # TODO: handle parameters that are in nested dictionaries

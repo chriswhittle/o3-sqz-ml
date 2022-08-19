@@ -162,7 +162,6 @@ class SQZModel:
 
             # initialize kmeans object for labeling, but instead manually
             # set cluster centers
-            cluster_count = int(cluster_count)
             self.kmeans = KMeans(
                 n_clusters=cluster_count, random_state=0, max_iter=1
             ).fit(self.clusters)
