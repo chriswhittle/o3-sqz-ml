@@ -107,7 +107,7 @@ def genetic_main(num_features, num_iter, config):
     # run through generations of genetic algorithm
     jobs_submitted = False
     for e in range(GENERATIONS):
-        logging.debug(f'Main thread starting generation {e}...')
+        logging.info(f'Main thread starting generation {e}...')
         # write the current row of members to the genetic data file
         if not loaded_save_file or e > 0:
             with open(save_path, 'a') as file:
@@ -143,7 +143,7 @@ def genetic_main(num_features, num_iter, config):
                     )
                 )
 
-            logging.debug('Submitting jobs')
+            logging.info('Submitting jobs')
             # start jobs and save job ID
             job_id = (os.popen(f'LLsub {submit_path}')
                         .read().split(' ')[-1]).replace('\n', '')
@@ -210,7 +210,7 @@ def genetic_main(num_features, num_iter, config):
         losses = -np.ones(G)
 
     # kill jobs and remove submit file
-    logging.debug(f'Killing job {job_id}...')
+    logging.info(f'Killing job {job_id}...')
     os.popen(f'LLkill {job_id}')
     os.remove(submit_path)
 
@@ -218,6 +218,8 @@ def genetic_sub(job_num, gps_ranges, num_features, config):
     '''
     Function for launching new training of individual generation members.
     '''
+    logging.info(f'Job {job_num} started')
+
     G = config['genetic']['pop_size']
     job_file = Path(JOB_LOSS_PATH.format(job_num))
 
@@ -241,7 +243,7 @@ def genetic_sub(job_num, gps_ranges, num_features, config):
             current_bitmask = bitmask_str2np(current_bitmask_str, num_features)
     
             # execute training
-            logging.debug(f'Running training for {current_bitmask_str}')
+            logging.info(f'Running training for {current_bitmask_str}')
             avg_loss = genetic_job(current_bitmask, gps_ranges,
                                     num_features, config)
 
@@ -249,6 +251,7 @@ def genetic_sub(job_num, gps_ranges, num_features, config):
             with open(job_file, 'w') as file:
                 file.write(f'{avg_loss}')
             models_trained += 1
+            logging.info('Training written to file.')
 
         time.sleep(SUB_POLL_PERIOD)
 
