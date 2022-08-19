@@ -135,7 +135,9 @@ def genetic_main(num_features, num_iter, config):
                 file.write(submit_stub.replace(
                         '[JOB_IDS]', f'0-{G}'
                     ).replace(
-                        '[SCRIPT_NAME]', os.path.basename(__file__)
+                        '[SCRIPT_PATH]', __file__
+                    ).replace(
+                        '[SCRIPT_TAG]', 'genetic'
                     ).replace(
                         '[SCRIPT_ARGS]', ''
                     )

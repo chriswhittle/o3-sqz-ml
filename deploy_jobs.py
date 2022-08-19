@@ -168,7 +168,9 @@ def deploy(save_path, lightweight, config_spans, config):
         file.write(submit_stub.replace(
                 '[JOB_IDS]', f'0-{num_jobs}'
             ).replace(
-                '[SCRIPT_NAME]', os.path.basename(__file__)
+                '[SCRIPT_PATH]', __file__
+            ).replace(
+                '[SCRIPT_TAG]', 'batch'
             ).replace(
                 '[SCRIPT_ARGS]', str(save_path) + ' --light' if lightweight else ''
             )
