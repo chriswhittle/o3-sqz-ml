@@ -8,6 +8,7 @@ import logging
 
 import numpy as np
 
+from slurm import submit_jobs
 from train_nn import SQZModel
 
 '''
@@ -163,22 +164,8 @@ def deploy(save_path, lightweight, config_spans, config):
         
     # write SLURM submit script with the required number of jobs
     submit_path = Path(save_path) / SUBMIT_FILENAME
-    logging.debug(f'Building submit file at {submit_path}')
-    with open(submit_path, 'w') as file:
-        file.write(submit_stub.replace(
-                '[JOB_IDS]', f'0-{num_jobs}'
-            ).replace(
-                '[SCRIPT_PATH]', __file__
-            ).replace(
-                '[SCRIPT_TAG]', 'batch'
-            ).replace(
-                '[SCRIPT_ARGS]', str(save_path) + ' --light' if lightweight else ''
-            )
-        )
-    
-    # submit jobs
-    logging.debug('Submitting jobs...')
-    os.popen(f'LLsub {submit_path}')
+    logging.debug(f'Building submit file at {submit_path} and submitting...')
+    submit_jobs(num_jobs, __file__, 'batch', submit_path, config)
 
 def sub_job(save_path, lightweight, job_num, config):
     '''

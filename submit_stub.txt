@@ -1,7 +1,6 @@
 #!/bin/bash
 
-#SBATCH -o logs/[SCRIPT_TAG].log-%A-%a
-#SBATCH -a [JOB_IDS]
+[BATCH_OPTIONS]
 
 source /etc/profile
 module load anaconda/2021a

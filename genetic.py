@@ -8,6 +8,7 @@ import logging
 
 import numpy as np
 
+from slurm import submit_jobs
 from train_nn import SQZModel
 
 '''
@@ -18,8 +19,8 @@ run with:
 `python genetic.py $jobId config.yaml` for the jobs
 '''
 
-# get path to source directory
-source_directory = Path(os.path.dirname(os.path.abspath(__file__)))
+# path for genetic bash submit file
+submit_path = Path('genetic/genetic.sh')
 
 # poll job statuses every X seconds
 MAIN_POLL_PERIOD = 5
@@ -57,12 +58,6 @@ def genetic_main(num_features, num_iter, config):
     G_CHILD = 2 * G // G_SELECT # number of children for each pair
     GENERATIONS = num_iter # number of iterations to run
     M_RATE = 1/num_features # mutation rate
-
-    # paths and template for submit scripts
-    submit_stub_path = source_directory / Path('submit_stub.txt')
-    submit_path = Path('genetic/genetic.sh')
-    with open(submit_stub_path) as file:
-        submit_stub = file.read()
     
     # set save path and make if doesn't already exist
     save_path = Path(config['genetic_path'])
@@ -129,24 +124,9 @@ def genetic_main(num_features, num_iter, config):
 
         # launch jobs (only done once) when loss file has been written
         if not jobs_submitted:
-            # new submit file containing incomplete job numbers
-            logging.debug(f'Writing submit file to {submit_path}')
-            with open(submit_path, 'w') as file:
-                file.write(submit_stub.replace(
-                        '[JOB_IDS]', f'0-{G}'
-                    ).replace(
-                        '[SCRIPT_PATH]', __file__
-                    ).replace(
-                        '[SCRIPT_TAG]', 'genetic'
-                    ).replace(
-                        '[SCRIPT_ARGS]', ''
-                    )
-                )
-
-            logging.info('Submitting jobs')
             # start jobs and save job ID
-            job_id = (os.popen(f'LLsub {submit_path}')
-                        .read().split(' ')[-1]).replace('\n', '')
+            logging.info('Submitting jobs')
+            job_id = submit_jobs(G, __file__, 'genetic', submit_path, config)
             jobs_submitted = True
 
         # periodically poll jobs to check loss values
