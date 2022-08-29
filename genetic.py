@@ -148,6 +148,8 @@ def genetic_main(num_features, num_iter, config):
                     past_losses[bitmask_np2str(generation[j])] = losses[j]
             
             incomplete_jobs = calc_incomplete(losses)
+            logging.debug('Current incomplete jobs: ' + 
+                            ','.join(map(str, incomplete_jobs)))
             time.sleep(MAIN_POLL_PERIOD)
         
         # convert losses to fitnesses by sorting then using index as fitness
