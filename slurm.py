@@ -7,7 +7,8 @@ SUBMIT_STUB_NAME = 'submit_stub.txt'
 # get path to source directory
 source_directory = Path(os.path.dirname(os.path.abspath(__file__)))
 
-def submit_jobs(num_jobs, script_path, log_tag, submit_path, config):
+def submit_jobs(num_jobs, script_path, log_tag,
+                submit_path, script_args = '', config = {}):
     '''
     Generate new slurm submit script based on given parameters and then use it
     to submit jobs.
@@ -16,6 +17,7 @@ def submit_jobs(num_jobs, script_path, log_tag, submit_path, config):
     script_path = path to script each job should run
     log_tag = label to use for log file naming
     submit_path = path of new submit file
+    script_args = additional commandline arguments to add after config file
     config = standard config dictionary, including nodes to be excluded
     '''
     # copy content of submit stub
@@ -51,6 +53,8 @@ def submit_jobs(num_jobs, script_path, log_tag, submit_path, config):
                 '[SCRIPT_PATH]', script_path
             ).replace(
                 '[BATCH_OPTIONS]', batch_options
+            ).replace(
+                '[SCRIPT_ARGS]', script_args
             )
         )
     

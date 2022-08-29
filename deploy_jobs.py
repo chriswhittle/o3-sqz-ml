@@ -155,17 +155,12 @@ def deploy(save_path, lightweight, config_spans, config):
                 f"{i} {' '.join([f'{k} {v}' for k, v in job.items()])}\n"
             )
 
-    #### build SLURM submit file
-
-    # read in submit stub
-    submit_stub_path = source_directory / Path('submit_stub.txt')
-    with open(submit_stub_path) as file:
-        submit_stub = file.read()
-        
-    # write SLURM submit script with the required number of jobs
+    #### submit jobs
     submit_path = Path(save_path) / SUBMIT_FILENAME
     logging.debug(f'Building submit file at {submit_path} and submitting...')
-    submit_jobs(num_jobs, __file__, 'batch', submit_path, config)
+    submit_jobs(num_jobs, __file__, 'batch',
+                submit_path, str(save_path) + ' --light' if lightweight else '',
+                config)
 
 def sub_job(save_path, lightweight, job_num, config):
     '''

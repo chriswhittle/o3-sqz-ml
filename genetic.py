@@ -126,7 +126,7 @@ def genetic_main(num_features, num_iter, config):
         if not jobs_submitted:
             # start jobs and save job ID
             logging.info('Submitting jobs')
-            job_id = submit_jobs(G, __file__, 'genetic', submit_path, config)
+            job_id = submit_jobs(G, __file__, 'genetic', submit_path, '', config)
             jobs_submitted = True
 
         # periodically poll jobs to check loss values
