@@ -11,6 +11,10 @@ from tensorflow.keras import layers
 from tensorflow.keras import callbacks
 from tensorflow.keras.layers.experimental import preprocessing
 
+# https://gist.github.com/qin-yu/b3da088669db84f87a2541578cf7fa60
+tf.config.threading.set_inter_op_parallelism_threads(4)
+tf.config.threading.set_intra_op_parallelism_threads(16)
+
 from sklearn.cluster import KMeans
 
 def load_data(processed_path, nominal_blrms_lims, channels,
