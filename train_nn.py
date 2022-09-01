@@ -204,6 +204,14 @@ class SQZModel:
         self.models = [None] * cluster_count
         self.loss_histories = [None] * cluster_count
 
+        # save training/validation labels/features/clusters in object
+        self.training_labels = training_labels
+        self.training_features = training_features
+        self.validation_labels = validation_labels
+        self.validation_features = validation_features
+        self.training_clusters = training_clusters
+        self.validation_clusters = validation_clusters
+
         for i in range(cluster_count):
             ####################
             # initialize model
@@ -421,3 +429,56 @@ class SQZModel:
                     )
 
         return sqz_est
+    
+    def gradient(self, normalize=True, sort=True, point=None):
+        # compute gradient of model at the specified point or, if undefined,
+        # the median of the training data (if a single model) or the cluster
+        # centroids (if multiple clusters).
+        # can optionally normalize by the standard deviation
+
+        # use median of training features if no point given and no clustering
+        if point is None and self.cluster_count == 1:
+            point = [self.training_features.median().to_frame().T]
+        # use cluster medians if clustering
+        elif point is None:
+            point = [self.clusters.iloc[i].to_frame().T 
+                        for i in range(self.cluster_count)]
+        # duplicate given point by number of clusters
+        else:
+            point = [point]*self.cluster_count
+        
+        # convert to tensorflow variable
+        point = [tf.Variable(p, dtype=tf.float32) for p in point]
+        
+        gradients = [None]*self.cluster_count
+        for i in range(self.cluster_count):
+            # compute gradient at given point
+            with tf.GradientTape() as tape:
+                predicted_sqz = self.models[i](point[i])
+            gradient = tape.gradient(predicted_sqz, point[i]).numpy()
+
+            # optionally normalize by standard deviation of channels
+            if normalize:
+                # use standard deviation within the specific cluster
+                gradient = gradient * (
+                    self.training_features[self.training_clusters==i]
+                    .std().to_numpy()
+                )
+        
+            # convert to dataframe
+            gradient_df = pd.DataFrame(
+                gradient, columns=self.training_features.columns
+            ).T.reset_index()
+            gradient_df = gradient_df.rename(columns={'index': 'Channel', 0: f'Gradient'})
+
+            # optionally sort by absolute value of the gradient
+            if sort:
+                # create temporary third column with the absolute value of the
+                # gradient for sorting
+                gradient_df['abs_gradient'] = gradient_df['Gradient'].abs()
+                gradient_df.sort_values(by='abs_gradient', inplace=True)
+                gradient_df.drop('abs_gradient', axis=1, inplace=True)
+
+            gradients[i] = gradient_df
+        
+        return gradients
