@@ -430,11 +430,22 @@ class SQZModel:
 
         return sqz_est
     
-    def gradient(self, normalize=True, sort=True, point=None):
+    def __gradient_tape(self, model, point, depth=1):
+        if depth == 0:
+            return model(point)
+
+        with tf.GradientTape() as tape:
+            evaluate = self.__gradient_tape(model, point, depth-1)
+        return tape.gradient(evaluate, point)
+
+    def gradient(self, normalize=True, sort=True, depth=1, point=None,
+                numerical=False):
         # compute gradient of model at the specified point or, if undefined,
         # the median of the training data (if a single model) or the cluster
         # centroids (if multiple clusters).
         # can optionally normalize by the standard deviation
+
+        NUMERICAL_STD_FRACTION = 20
 
         # use median of training features if no point given and no clustering
         if point is None and self.cluster_count == 1:
@@ -447,15 +458,48 @@ class SQZModel:
         else:
             point = [point]*self.cluster_count
         
-        # convert to tensorflow variable
-        point = [tf.Variable(p, dtype=tf.float32) for p in point]
-        
         gradients = [None]*self.cluster_count
         for i in range(self.cluster_count):
             # compute gradient at given point
-            with tf.GradientTape() as tape:
-                predicted_sqz = self.models[i](point[i])
-            gradient = tape.gradient(predicted_sqz, point[i]).numpy()
+            if numerical:
+                # set up gradient array for results
+                gradient = np.zeros((1, self.training_features.columns.size))
+
+                # compute sqz estimate at the point of interest
+                est_mid = self.models[i](point[i])
+
+                # iterate over all channels
+                for j, c in enumerate(self.training_features.columns):
+                    # use some fraction of the channel std for the finite
+                    # difference computation
+                    h = (self.training_features[self.training_clusters==i][c]
+                            .std() / NUMERICAL_STD_FRACTION)
+
+                    # compute the sqz estimate at offsets from the point of
+                    # interest
+                    sign = [-1, 1]
+                    ests = [0, 0]
+                    for k, s in enumerate(sign):
+                        p = point[i].copy()
+                        p[c] = p[c] + h * s
+                        ests[k] = self.models[i](p)
+
+                    # depending on required differentiation order, use appropriate
+                    # finite difference coefficients
+                    # https://en.wikipedia.org/wiki/Finite_difference_coefficient
+                    if depth == 1:
+                        gradient[0,j] = (-ests[0] + ests[1]) / 2 / h
+                    elif depth == 2:
+                        gradient[0,j] = (ests[0] - 2*est_mid + ests[1]) / h**2
+                    else:
+                        raise RuntimeError(
+                            "Can only numerically compute first and second derivatives"
+                        )
+            else:
+                # convert to tensorflow variable
+                tf_point = [tf.Variable(p, dtype=tf.float32) for p in point]
+
+                gradient = self.__gradient_tape(self.models[i], tf_point[i], depth).numpy()
 
             # optionally normalize by standard deviation of channels
             if normalize:
@@ -463,11 +507,12 @@ class SQZModel:
                 gradient = gradient * (
                     self.training_features[self.training_clusters==i]
                     .std().to_numpy()
-                )
+                )**depth
         
             # convert to dataframe
+            # negative gradient since internal model maps to negative sqz
             gradient_df = pd.DataFrame(
-                gradient, columns=self.training_features.columns
+                - gradient, columns=self.training_features.columns
             ).T.reset_index()
             gradient_df = gradient_df.rename(columns={'index': 'Channel', 0: f'Gradient'})
 
