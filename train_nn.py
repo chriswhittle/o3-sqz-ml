@@ -58,7 +58,7 @@ class SQZModel:
                 nominal_blrms_lims, neural_network, cut_channels, channels,
                 val_fraction=0.2, val_start_gps=None, val_end_gps=None,
                 save_period=10, batch_size=512, cluster_count=1,
-                interpolate=True, **kwargs):
+                interpolate=True, show_progress=False, **kwargs):
         # save_path = None => nothing saved
         ###################################################
         #### prepare data for training the neural network
@@ -305,7 +305,7 @@ class SQZModel:
             # if loss file doesn't exist and model needs to be trained
             else:
                 # set verbosity level for training
-                is_verbose = logging.root.level <= logging.DEBUG
+                is_verbose = (logging.root.level <= logging.DEBUG) or show_progress
 
                 # set up callbacks for saving model checkpoints
                 if save_path is None:
