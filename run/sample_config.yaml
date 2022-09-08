@@ -1,11 +1,74 @@
+#### DATA FETCHING
 keytab_path: /path/to/your.keytab
+ifo: X0
 
+#### GPS TIMES
 start_gps: 1256875000
 end_gps: 1269734418
 
 no_sqz_start_gps: 1259798868
 no_sqz_end_gps: 1259799468
 
+#### DATA PATHS
+sqz_path: data/sqz_data.csv
+aux_path: data/aux_data.csv
+processed_path: data/data.csv
+
+#### CHANNELS
+veto_channels:
+  GRD-ISC_LOCK_OK.min,m-trend: 1
+  GRD-SQZ_MANAGER_OK.min,m-trend: 1
+
+ifo_lock_channels:
+  GRD-ISC_LOCK_OK.min,m-trend: 1
+
+cut_channels:
+  - GRD-ISC_LOCK_OK.min,m-trend
+  - GRD-SQZ_MANAGER_OK.min,m-trend
+
 channels:
- L1:SQZ-OPO_TEC_THERMISTOR_TEMPERATURE.mean,m-trend: OPO Temp.
- L1:SQZ-SHG_TEC_THERMISTOR_TEMPERATURE.mean,m-trend: SHG Temp.
+ SQZ-OPO_TEC_THERMISTOR_TEMPERATURE.mean,m-trend: OPO Temp.
+ SQZ-SHG_TEC_THERMISTOR_TEMPERATURE.mean,m-trend: SHG Temp.
+
+#### BLRMS
+nominal_blrms_lims:
+  - 1100
+  - 1900
+
+blrms_lims:
+  - - 1100
+    - 1900
+  - - 3450
+    - 4450
+    
+#### NEURAL NETWORK CONFIGURATION
+neural_network:
+  dense_layers: 2
+  dense_dim: 64
+  rff_dim: 4096
+  activation: tanh
+  epochs: 30
+  lstm_dim: 0
+  lstm_lookback: 0
+
+cluster_count: 1
+
+#### GENETIC ALGORITHM DETAILS
+genetic_path: genetic/genetic.txt
+
+genetic:
+  pop_size: 80
+  gps_ranges:
+    - - 1256875000
+      - 1259467000
+    - - 1259467000
+      - 1262059000
+    - - 1262059000
+      - 1264651000
+
+genetic_network:
+  epochs: 20
+
+#### SLURM OPTIONS
+computation:
+  excluded_hosts: []
