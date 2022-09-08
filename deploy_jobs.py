@@ -239,8 +239,13 @@ if __name__ == "__main__":
         while arg_ind < len(args):
             # handle case with list of values
             if ',' in args[arg_ind+1]:
+                values = args[arg_ind+1].split(',')
+                # remove blank options to allow for setting config parameter
+                # to a single value
+                values.remove('')
+
                 config_spans += [
-                    {'param': args[arg_ind], 'values': args[arg_ind+1].split(',')}
+                    {'param': args[arg_ind], 'values': values}
                 ]
                 arg_ind += 2
             # handle case with range specified
