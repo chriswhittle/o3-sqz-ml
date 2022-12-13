@@ -9,11 +9,12 @@ import numpy as np
 import pandas as pd
 
 from gwpy.timeseries import TimeSeriesDict
+from subprocess import CalledProcessError
 
 TIME_COL = 'gps_time'
 SEGMENT_SIZE = 60
 
-def fetch_timeseries(channels, gps_start, gps_end, max_attempts=3):
+def fetch_timeseries(channels, gps_start, gps_end, max_attempts=6):
     '''
     Use gwpy to fetch channel data, allowing for a number of re-attempts up to
     some maximum.
@@ -24,7 +25,7 @@ def fetch_timeseries(channels, gps_start, gps_end, max_attempts=3):
                                         gps_start, gps_end,
                                         allow_tape=True)
             return data
-        except (KeyError, RuntimeError):
+        except (KeyError, RuntimeError, CalledProcessError):
             pass
     logging.debug(f'Failed to fetch {channels} in {gps_start}-{gps_start} '
                     + f'after {max_attempts} attempts.')
