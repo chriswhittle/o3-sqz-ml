@@ -5,11 +5,19 @@ import numpy as np
 import pandas as pd
 from tqdm.keras import TqdmCallback
 
+from SALib.sample import saltelli
+from SALib.analyze import sobol
+
 import tensorflow as tf
 from tensorflow.keras import layers
 from tensorflow.keras import callbacks
 from tensorflow.keras import utils
 from tensorflow.keras.layers.experimental import RandomFourierFeatures
+
+# suppress tensorflow optimization messages
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 
 # https://gist.github.com/qin-yu/b3da088669db84f87a2541578cf7fa60
 tf.config.threading.set_inter_op_parallelism_threads(4)
@@ -403,6 +411,9 @@ class SQZModel:
                 self.save_avg_loss(avg_loss_filepath)
 
     def estimate_sqz(self, features):
+        # convert feature values to DataFrame if not already
+        features = pd.DataFrame(features, columns=self.training_features.columns)
+
         # detrend data
         norm_features = self.detrend(features)
 
@@ -440,6 +451,41 @@ class SQZModel:
                     )
 
         return sqz_est
+    
+    def sobol(self, N=1000):
+        '''
+        Computes Sobol indices for current model.
+
+        N = number of samples will be computed as (N x number of features)
+
+        Returns dictionary with keys:
+        'S1' = list of first-order Sobol indices
+        'S2' = matrix of second-order Sobol indices
+        'ST' = list of total-order indices (ST~=S1 indices mostly first-order
+        interactions, while ST-S1>0 implies higher-order interactions)
+
+        Also '_conf' suffixes to get 95% confidence intervals
+        '''
+        # define number of parameters and bounds
+        sobol_problem = {
+            'num_vars': len(self.training_features.columns),
+            'names': self.training_features.columns,
+            'bounds': list(zip(
+                self.training_features.min().to_list(),
+                self.training_features.max().to_list()
+            ))
+        }
+
+        # generate random samples
+        feature_values = saltelli.sample(sobol_problem, N)
+
+        # run samples through model
+        est_sqz = self.estimate_sqz(feature_values)
+
+        # compute Sobol indices
+        Si = sobol.analyze(sobol_problem, est_sqz)
+
+        return Si
     
     def __gradient_tape(self, model, point, depth=1):
         if depth == 0:
