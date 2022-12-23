@@ -7,9 +7,9 @@ from tqdm.keras import TqdmCallback
 
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow.keras import layers
-from tensorflow.keras import callbacks
-from tensorflow.keras.layers.experimental import preprocessing
+from keras import layers
+from keras import callbacks
+from keras import preprocessing
 
 # https://gist.github.com/qin-yu/b3da088669db84f87a2541578cf7fa60
 tf.config.threading.set_inter_op_parallelism_threads(4)
@@ -53,6 +53,79 @@ class SQZModel:
             header='loss val_loss'
         )
 
+    def compute_clusters(self, cluster_count, save_path=None,
+                        output_file_path=None):
+        # try to load detrending properties
+        if (save_path is not None and output_file_path is not None and
+            (output_file_path / self.DETREND_VALUES_FILENAME).is_file()
+        ):
+            aux_values = np.loadtxt(
+                output_file_path / self.DETREND_VALUES_FILENAME
+            )
+
+            aux_mean = aux_values[0,:]
+            aux_std = aux_values[1,:]
+        # compute detrending properties
+        else:
+            aux_mean = self.training_features.mean()
+            aux_std = self.training_features.std()
+
+            # save detrending values for loading later on
+            if save_path is not None:
+                np.savetxt(
+                    output_file_path / self.DETREND_VALUES_FILENAME,
+                    np.vstack( (aux_mean, aux_std) )
+                )
+
+        # define detrending functions
+        self.detrend = lambda d: (d - aux_mean) / aux_std
+        self.retrend = lambda r: (r * aux_std) + aux_mean
+        
+        # detrend data to get normed data for labeling by cluster
+        norm_data = self.detrend(self.training_features)
+
+        # try to load cluster centroids
+        if (save_path is not None and output_file_path is not None
+            and (output_file_path / self.CLUSTERS_FILENAME).is_file()
+        ):
+            # load cluster centers from file (use first column as cluster IDs)
+            self.clusters = pd.read_csv(
+                output_file_path / self.CLUSTERS_FILENAME,
+                index_col=0
+            )
+
+            # initialize kmeans object for labeling, but instead manually
+            # set cluster centers
+            self.kmeans = KMeans(
+                n_clusters=cluster_count, random_state=0, max_iter=1
+            ).fit(self.clusters)
+            self.kmeans.cluster_centers_ = np.ascontiguousarray(
+                self.clusters, dtype=np.float
+            )
+
+            # label training data based on clusters
+            training_clusters = self.kmeans.predict(self.detrend(self.training_features))
+        else:
+            # do k-means clustering
+            self.kmeans = KMeans(n_clusters=cluster_count, random_state=0).fit(
+                norm_data
+            )
+            
+            self.clusters = pd.DataFrame(self.kmeans.cluster_centers_, columns=norm_data.columns)
+            if save_path is not None:
+                # save cluster centers
+                self.clusters.to_csv(output_file_path / self.CLUSTERS_FILENAME)
+
+                # save de-normalized cluster centers
+                self.retrend(self.clusters).to_csv(output_file_path / self.CLUSTERS_ABS_FILENAME)
+
+            # use labels allocated during k-means for the training labels
+            training_clusters = self.kmeans.labels_
+
+        # compute labels for the validation data
+        validation_clusters = self.kmeans.predict(self.detrend(self.validation_features))
+
+        return self.clusters, training_clusters, validation_clusters
 
     def __init__(self, save_path, sub_start_gps, sub_end_gps, processed_path,
                 nominal_blrms_lims, neural_network, cut_channels, channels,
@@ -122,78 +195,19 @@ class SQZModel:
                 sequence_length=neural_network['lstm_lookback']
             )
 
+        # save training/validation labels/features in object
+        self.training_labels = training_labels
+        self.training_features = training_features
+        self.validation_labels = validation_labels
+        self.validation_features = validation_features
+
         ###################################################
         #### compute clusters
 
-        # try to load detrending properties
-        if (save_path is not None and 
-            (output_file_path / self.DETREND_VALUES_FILENAME).is_file()
-        ):
-            aux_values = np.loadtxt(
-                output_file_path / self.DETREND_VALUES_FILENAME
-            )
-
-            aux_mean = aux_values[0,:]
-            aux_std = aux_values[1,:]
-        # compute detrending properties
-        else:
-            aux_mean = training_features.mean()
-            aux_std = training_features.std()
-
-            # save detrending values for loading later on
-            if save_path is not None:
-                np.savetxt(
-                    output_file_path / self.DETREND_VALUES_FILENAME,
-                    np.vstack( (aux_mean, aux_std) )
-                )
-
-        # define detrending functions
-        self.detrend = lambda d: (d - aux_mean) / aux_std
-        self.retrend = lambda r: (r * aux_std) + aux_mean
-        
-        # detrend data to get normed data for labeling by cluster
-        norm_data = self.detrend(training_features)
-
-        # try to load cluster centroids
-        if (save_path is not None and 
-            (output_file_path / self.CLUSTERS_FILENAME).is_file()
-        ):
-            # load cluster centers from file (use first column as cluster IDs)
-            self.clusters = pd.read_csv(
-                output_file_path / self.CLUSTERS_FILENAME,
-                index_col=0
-            )
-
-            # initialize kmeans object for labeling, but instead manually
-            # set cluster centers
-            self.kmeans = KMeans(
-                n_clusters=cluster_count, random_state=0, max_iter=1
-            ).fit(self.clusters)
-            self.kmeans.cluster_centers_ = np.ascontiguousarray(
-                self.clusters, dtype=np.float
-            )
-
-            # label training data based on clusters
-            training_clusters = self.kmeans.predict(self.detrend(training_features))
-        else:
-            # do k-means clustering
-            self.kmeans = KMeans(n_clusters=cluster_count, random_state=0).fit(
-                norm_data
-            )
-            
-            self.clusters = pd.DataFrame(self.kmeans.cluster_centers_, columns=norm_data.columns)
-            if save_path is not None:
-                # save cluster centers
-                self.clusters.to_csv(output_file_path / self.CLUSTERS_FILENAME)
-
-                # save de-normalized cluster centers
-                self.retrend(self.clusters).to_csv(output_file_path / self.CLUSTERS_ABS_FILENAME)
-
-            # use labels allocated during k-means for the training labels
-            training_clusters = self.kmeans.labels_
-
-        # compute labels for the validation data
-        validation_clusters = self.kmeans.predict(self.detrend(validation_features))
+        ( clusters, training_clusters,
+            validation_clusters ) = self.compute_clusters(
+                cluster_count, save_path, output_file_path
+        )
         
         ###################################################
         #### training the neural networks
@@ -203,12 +217,9 @@ class SQZModel:
         self.interpolate = interpolate
         self.models = [None] * cluster_count
         self.loss_histories = [None] * cluster_count
-
-        # save training/validation labels/features/clusters in object
-        self.training_labels = training_labels
-        self.training_features = training_features
-        self.validation_labels = validation_labels
-        self.validation_features = validation_features
+        
+        # save cluster data in object
+        self.clusters = clusters
         self.training_clusters = training_clusters
         self.validation_clusters = validation_clusters
 
