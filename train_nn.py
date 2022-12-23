@@ -6,10 +6,10 @@ import pandas as pd
 from tqdm.keras import TqdmCallback
 
 import tensorflow as tf
-from tensorflow import keras
-from keras import layers
-from keras import callbacks
-from keras import preprocessing
+from tensorflow.keras import layers
+from tensorflow.keras import callbacks
+from tensorflow.keras import utils
+from tensorflow.keras.layers.experimental import RandomFourierFeatures
 
 # https://gist.github.com/qin-yu/b3da088669db84f87a2541578cf7fa60
 tf.config.threading.set_inter_op_parallelism_threads(4)
@@ -180,7 +180,7 @@ class SQZModel:
             training_labels = training_labels.reset_index().drop(
                 columns='gps_time')
 
-            training_dataset = tf.keras.preprocessing.timeseries_dataset_from_array(
+            training_dataset = utils.timeseries_dataset_from_array(
                 data=training_features, targets=training_labels,
                 sequence_length=neural_network['lstm_lookback']
             )
@@ -190,7 +190,7 @@ class SQZModel:
             validation_labels = validation_labels.reset_index().drop(
                 columns='gps_time')
 
-            val_dataset = tf.keras.preprocessing.timeseries_dataset_from_array(
+            val_dataset = utils.timeseries_dataset_from_array(
                 data=validation_features, targets=validation_labels,
                 sequence_length=neural_network['lstm_lookback']
             )
@@ -236,11 +236,11 @@ class SQZModel:
             sub_validation_exists = (validation_clusters==i).sum() > 0
 
             # set up normalizer layer
-            normalizer = preprocessing.Normalization()
+            normalizer = layers.Normalization()
             normalizer.adapt(np.array(sub_training_features))
 
             # define internal layers in neural network
-            model = keras.Sequential(
+            model = tf.keras.Sequential(
                 # input layer for LSTM
                 (
                     [] if neural_network['lstm_dim'] == 0
@@ -254,7 +254,7 @@ class SQZModel:
                 # RFF layer
                 + (
                     [] if neural_network['rff_dim'] == 0
-                    else [layers.experimental.RandomFourierFeatures(
+                    else [RandomFourierFeatures(
                         output_dim=neural_network['rff_dim']
                     )]
                 )
