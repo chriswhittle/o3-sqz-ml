@@ -73,7 +73,8 @@ def process_data(sqz_path, aux_path, processed_path, ifo_lock_channels,
 
     # remove unneeded columns
     for c in cut_channels:
-        data.pop(f'{ifo}:{c}')
+        if c in data:
+            data.pop(f'{ifo}:{c}')
     data.pop('locked')
 
     # rename columns to friendly names
