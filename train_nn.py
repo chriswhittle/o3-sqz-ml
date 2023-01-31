@@ -62,9 +62,11 @@ class SQZModel:
         )
 
     def compute_clusters(self, cluster_count, save_path=None,
-                        output_file_path=None):
+                        output_file_path=None, force_overwrite=False):
+        loading_model = (save_path is not None and not force_overwrite)
+
         # try to load detrending properties
-        if (save_path is not None and output_file_path is not None and
+        if (loading_model and output_file_path is not None and
             (output_file_path / self.DETREND_VALUES_FILENAME).is_file()
         ):
             aux_values = np.loadtxt(
@@ -93,7 +95,7 @@ class SQZModel:
         norm_data = self.detrend(self.training_features)
 
         # try to load cluster centroids
-        if (save_path is not None and output_file_path is not None
+        if (loading_model and output_file_path is not None
             and (output_file_path / self.CLUSTERS_FILENAME).is_file()
         ):
             # load cluster centers from file (use first column as cluster IDs)
@@ -139,7 +141,8 @@ class SQZModel:
                 nominal_blrms_lims, neural_network, cut_channels, channels,
                 val_fraction=0.2, val_start_gps=None, val_end_gps=None,
                 save_period=10, batch_size=512, cluster_count=1,
-                interpolate=True, show_progress=False, **kwargs):
+                interpolate=True, show_progress=False, force_overwrite=False,
+                **kwargs):
         # save_path = None => nothing saved
         ###################################################
         #### prepare data for training the neural network
@@ -289,6 +292,8 @@ class SQZModel:
             ####################
             # train/load model
 
+            loading_model = (save_path is not None and not force_overwrite)
+
             if save_path is not None:
                 # create subfolder for this sub-network if it doesn't exist
                 sub_output_path = output_file_path / f'cluster_{i}'
@@ -298,7 +303,7 @@ class SQZModel:
                 loss_path = sub_output_path / self.LOSS_HISTORY_FILENAME
 
             # if loss file exists (and model was already trained)
-            if save_path is not None and loss_path.is_file():
+            if loading_model and loss_path.is_file():
                 # load loss history from file
                 loss_history = np.loadtxt(loss_path, skiprows=1)
                 
