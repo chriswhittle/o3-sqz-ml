@@ -26,6 +26,10 @@ tf.config.threading.set_intra_op_parallelism_threads(16)
 
 from sklearn.cluster import KMeans
 
+RNN_TYPES = {
+    'lstm': tf.keras.layers.LSTM
+}
+
 def load_data(processed_path, nominal_blrms_lims, channels,
                 cut_channels, **kwargs):
     # load in data
@@ -93,6 +97,22 @@ class SQZModel:
             save_path,
             self.loss_history_avg,
             header='loss val_loss'
+        )
+
+    ################################################
+    #### helper function for building datasets for
+    #### RNN input
+    def build_sequence_dataset(self, features, labels=None):
+        # convert to numpy arrays so tf timeseries generation does correct
+        # indexing
+        features = np.array(features)
+        labels = np.array(features)
+
+        return tf.keras.utils.timeseries_dataset_from_array(
+            features,
+            labels[self.lookback-1:],
+            self.lookback,
+            sequence_stride=1
         )
 
     ################################################
@@ -164,6 +184,13 @@ class SQZModel:
                 **kwargs):
         # save_path = None => nothing saved
 
+
+        # throw error if clustered neural network and RNN
+        if cluster_count > 1 and neural_network['rnn']['type'] in RNN_TYPES:
+            raise RuntimeError(
+                'Cannot use clustered neural networks with RNN.'
+            )
+
         ###################################################
         #### prepare data for training the neural network
         data = load_data(processed_path,
@@ -206,30 +233,6 @@ class SQZModel:
         
         self.feature_columns = training_features.columns
 
-        # shape training data for LSTM
-        if neural_network['lstm_dim'] > 0:
-            # TODO:
-
-            training_features = training_features.reset_index().drop(
-                columns='gps_time')
-            training_labels = training_labels.reset_index().drop(
-                columns='gps_time')
-
-            training_dataset = utils.timeseries_dataset_from_array(
-                data=training_features, targets=training_labels,
-                sequence_length=neural_network['lstm_lookback']
-            )
-
-            validation_features = validation_features.reset_index().drop(
-                columns='gps_time')
-            validation_labels = validation_labels.reset_index().drop(
-                columns='gps_time')
-
-            val_dataset = utils.timeseries_dataset_from_array(
-                data=validation_features, targets=validation_labels,
-                sequence_length=neural_network['lstm_lookback']
-            )
-
         # save training/validation labels/features in object
         self.raw_data = SQZData(
             training_features,
@@ -266,6 +269,24 @@ class SQZModel:
             self.features_detrender.detrend(self.raw_data.validation_features),
             self.labels_detrender.detrend(self.raw_data.validation_labels)
         )
+
+        ###################################################
+        #### produce shifted datasets for RNNs
+
+        # shape training data for LSTM
+        if neural_network['rnn']['type'] in RNN_TYPES:
+            self.lookback = neural_network['rnn']['lookback']
+            self.training_rnn_ds = self.build_sequence_dataset(
+                self.detrended_data.training_features,
+                self.detrended_data.training_labels
+            )
+            
+            self.validation_rnn_ds = self.build_sequence_dataset(
+                self.detrended_data.validation_features,
+                self.detrended_data.validation_labels
+            )
+        else:
+            self.lookback = 0
 
         ###################################################
         #### compute clusters
@@ -343,28 +364,25 @@ class SQZModel:
             else:
                 # define internal layers in neural network
                 model = tf.keras.Sequential(
-                    # input layer for LSTM
-                    (
-                        [] if neural_network['lstm_dim'] == 0
-                        # else [layers.Input(
-                        #     shape=()
-                        # )]
-                        else [] #########
-                    )
                     # RFF layer
-                    + (
-                        [] if neural_network['rff_dim'] == 0
+                    # include if non-zero dimension specified or if RNN
+                    # (in which case neural network accepts time series)
+                    (
+                        [] if (neural_network['rff_dim'] == 0 or
+                        neural_network['rnn']['type'] in RNN_TYPES)
                         else [RandomFourierFeatures(
                             output_dim=neural_network['rff_dim']
                         )]
                     )
-                    # LSTM layers
+                    # RNN layers
                     + (
-                        [] if neural_network['lstm_dim'] == 0
-                        else [layers.LSTM(
-                            units=neural_network['lstm_dim'],
-                            stateful=True
-                        )]
+                        [
+                            RNN_TYPES[neural_network['rnn']['type']](
+                                units=neural_network['rnn']['dim']
+                            )
+                        ]
+                        if neural_network['rnn']['type'] in RNN_TYPES
+                        else []
                     )
                     # dense layers
                     + [layers.Dense(neural_network['dense_dim'],
@@ -403,9 +421,12 @@ class SQZModel:
                     'callbacks':callbacks_list,
                     'batch_size': batch_size
                 }
-                if neural_network['lstm_dim'] > 0:
-                    # TODO:
-                    model.fit(training_dataset, validation_data=val_dataset, **fit_args)
+                if neural_network['rnn']['type'] in RNN_TYPES:
+                    model.fit(
+                        self.training_rnn_ds,
+                        validation_data=self.validation_rnn_ds,
+                        **fit_args
+                    )
                 else:
                     if sub_validation_exists:
                         inds = (validation_clusters==i)
@@ -485,41 +506,60 @@ class SQZModel:
 
         # detrend provided data
         detrended_features = self.features_detrender.detrend(features)
-
-        # interpolate between cluster centers to produce final estimate
-        if self.interpolate:
-            # compute sqz estimate from each model
-            sqz_ests = [
-                model.predict(detrended_features).flatten()
-                for model in self.models
-            ]
-
-            # compute distances for each data point from each cluster
-            # (number of clusters, number of data points)
-            distances = np.zeros( (self.cluster_count, features.shape[0]) )
-            for i in range(self.cluster_count):
-                distances[i,:] = np.sqrt(
-                    np.square(detrended_features - self.clusters.loc[i]).sum(axis=1)
+        
+        # handle RNN
+        if self.lookback > 0:
+            # if RNN and datapoints given is less than lookback, throw error
+            if features.shape[0] < self.lookback:
+                raise RuntimeError(
+                    f'Insufficient datapoints given for RNN lookback length {self.lookback}'
                 )
-            # use inverse distance as weighting for model
-            weights = 1 / distances
+            elif self.cluster_count > 1:
+                raise RuntimeError(
+                    'Cannot use clustered neural networks with RNN.'
+                )
+            # build timeseries of input features for RNN and compute sqz
+            # estimate
+            else:
+                rnn_ds = self.build_sequence_dataset(detrended_features)
+                sqz_est = self.models[0].predict(rnn_ds).flatten()
 
-            sqz_est = (sqz_ests * weights).sum(axis=0) / weights.sum(axis=0)
-        # label each data point based on cluster membership and use
-        # a single model to predict
         else:
-            # calculate clusters for each data point
-            labels = self.kmeans.predict(detrended_features)
-            
-            # initialize array for sqz estimate
-            sqz_est = np.zeros(labels.shape)
+            # for non-RNN networks, interpolate between cluster centers to
+            # produce final estimate
+            if self.interpolate:
+                # compute sqz estimate from each model
+                sqz_ests = [
+                    model.predict(detrended_features).flatten()
+                    for model in self.models
+                ]
 
-            for i in range(self.cluster_count):
-                if (labels==i).sum() > 0:
-                    sqz_est[labels==i] = (
-                        self.models[i].predict(detrended_features[labels==i])
-                        .flatten()
+                # compute distances for each data point from each cluster
+                # (number of clusters, number of data points)
+                distances = np.zeros( (self.cluster_count, features.shape[0]) )
+                for i in range(self.cluster_count):
+                    distances[i,:] = np.sqrt(
+                        np.square(detrended_features - self.clusters.loc[i]).sum(axis=1)
                     )
+                # use inverse distance as weighting for model
+                weights = 1 / distances
+
+                sqz_est = (sqz_ests * weights).sum(axis=0) / weights.sum(axis=0)
+            # label each data point based on cluster membership and use
+            # a single model to predict
+            else:
+                # calculate clusters for each data point
+                labels = self.kmeans.predict(detrended_features)
+                
+                # initialize array for sqz estimate
+                sqz_est = np.zeros(labels.shape)
+
+                for i in range(self.cluster_count):
+                    if (labels==i).sum() > 0:
+                        sqz_est[labels==i] = (
+                            self.models[i].predict(detrended_features[labels==i])
+                            .flatten()
+                        )
 
         return self.labels_detrender.retrend(sqz_est)
     
@@ -539,6 +579,9 @@ class SQZModel:
 
         Also '_conf' suffixes to get 95% confidence intervals
         '''
+        if self.lookback > 0:
+            raise RuntimeError('Cannot compute Sobol indices for RNN.')
+
         # define number of parameters and bounds
         sobol_problem = {
             'num_vars': self.feature_columns.shape,
@@ -570,6 +613,9 @@ class SQZModel:
 
     def gradient(self, normalize=True, sort=True, depth=1, point=None,
                 numerical=False):
+        if self.lookback > 0:
+            raise RuntimeError('Cannot compute gradient for RNN.')
+
         # compute gradient of model at the specified point or, if undefined,
         # the median of the training data (if a single model) or the cluster
         # centroids (if multiple clusters).
