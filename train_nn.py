@@ -137,7 +137,7 @@ class SQZModel:
                 n_clusters=cluster_count, random_state=0, max_iter=1
             ).fit(self.clusters)
             self.kmeans.cluster_centers_ = np.ascontiguousarray(
-                self.clusters, dtype=np.float
+                self.clusters, dtype=float
             )
 
             # label training data based on clusters
