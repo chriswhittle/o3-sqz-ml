@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
 
@@ -47,13 +48,46 @@ def load_data(processed_path, nominal_blrms_lims, channels,
 
     return data
 
+@dataclass
+class SQZData:
+    training_features: pd.DataFrame
+    training_labels: pd.DataFrame
+    validation_features: pd.DataFrame
+    validation_labels: pd.DataFrame
+
+class Detrender:
+    def __init__(self, data, save_path=None, loading_model=True):
+        # try to load detrend values from file
+        if (save_path is not None and save_path.is_file() and loading_model):
+            detrend_values = np.loadtxt(save_path, ndmin=2)
+            self.mean = detrend_values[0,:]
+            self.std = detrend_values[1,:]
+        # otherwise compute detrend values
+        else:
+            self.mean = data.mean()
+            self.std = data.std()
+
+            # optionally save to file
+            if save_path is not None:
+                np.savetxt(save_path, np.vstack((self.mean, self.std)))
+
+
+    def detrend(self, data):
+        return (data - self.mean) / self.std
+    
+    def retrend(self, data):
+        return data * self.std + self.mean
+
 class SQZModel:
     # filename constants
     LOSS_HISTORY_FILENAME = 'loss.txt'
-    DETREND_VALUES_FILENAME = 'detrend.txt'
+    DETREND_FEATURES_FILENAME = 'detrend_features.txt'
+    DETREND_LABELS_FILENAME = 'detrend_labels.txt'
     CLUSTERS_FILENAME = 'clusters.csv'
     CLUSTERS_ABS_FILENAME = 'clusters_abs.csv'
 
+    ################################################
+    #### helper function for saving training history
     def save_avg_loss(self, save_path):
         np.savetxt(
             save_path,
@@ -61,39 +95,12 @@ class SQZModel:
             header='loss val_loss'
         )
 
+    ################################################
+    #### cluster computation
     def compute_clusters(self, cluster_count, save_path=None,
                         output_file_path=None, force_overwrite=False):
         loading_model = (save_path is not None and not force_overwrite)
-
-        # try to load detrending properties
-        if (loading_model and output_file_path is not None and
-            (output_file_path / self.DETREND_VALUES_FILENAME).is_file()
-        ):
-            aux_values = np.loadtxt(
-                output_file_path / self.DETREND_VALUES_FILENAME
-            )
-
-            aux_mean = aux_values[0,:]
-            aux_std = aux_values[1,:]
-        # compute detrending properties
-        else:
-            aux_mean = self.training_features.mean()
-            aux_std = self.training_features.std()
-
-            # save detrending values for loading later on
-            if save_path is not None:
-                np.savetxt(
-                    output_file_path / self.DETREND_VALUES_FILENAME,
-                    np.vstack( (aux_mean, aux_std) )
-                )
-
-        # define detrending functions
-        self.detrend = lambda d: (d - aux_mean) / aux_std
-        self.retrend = lambda r: (r * aux_std) + aux_mean
         
-        # detrend data to get normed data for labeling by cluster
-        norm_data = self.detrend(self.training_features)
-
         # try to load cluster centroids
         if (loading_model and output_file_path is not None
             and (output_file_path / self.CLUSTERS_FILENAME).is_file()
@@ -114,29 +121,41 @@ class SQZModel:
             )
 
             # label training data based on clusters
-            training_clusters = self.kmeans.predict(self.detrend(self.training_features))
+            training_clusters = self.kmeans.predict(
+                self.detrended_data.training_features
+            )
         else:
             # do k-means clustering
             self.kmeans = KMeans(n_clusters=cluster_count, random_state=0).fit(
-                norm_data
+                self.detrended_data.training_features
             )
             
-            self.clusters = pd.DataFrame(self.kmeans.cluster_centers_, columns=norm_data.columns)
+            self.clusters = pd.DataFrame(
+                self.kmeans.cluster_centers_,
+                columns=self.feature_columns
+            )
             if save_path is not None:
                 # save cluster centers
                 self.clusters.to_csv(output_file_path / self.CLUSTERS_FILENAME)
 
                 # save de-normalized cluster centers
-                self.retrend(self.clusters).to_csv(output_file_path / self.CLUSTERS_ABS_FILENAME)
+                retrended_clusters = self.features_detrender.retrend(self.clusters)
+                retrended_clusters.to_csv(
+                    output_file_path / self.CLUSTERS_ABS_FILENAME
+                )
 
             # use labels allocated during k-means for the training labels
             training_clusters = self.kmeans.labels_
 
         # compute labels for the validation data
-        validation_clusters = self.kmeans.predict(self.detrend(self.validation_features))
+        validation_clusters = self.kmeans.predict(
+            self.detrended_data.validation_features
+        )
 
         return self.clusters, training_clusters, validation_clusters
 
+    ################################################
+    #### initialization
     def __init__(self, save_path, sub_start_gps, sub_end_gps, processed_path,
                 nominal_blrms_lims, neural_network, cut_channels, channels,
                 val_fraction=0.2, val_start_gps=None, val_end_gps=None,
@@ -144,6 +163,7 @@ class SQZModel:
                 interpolate=True, show_progress=False, force_overwrite=False,
                 **kwargs):
         # save_path = None => nothing saved
+
         ###################################################
         #### prepare data for training the neural network
         data = load_data(processed_path,
@@ -183,9 +203,13 @@ class SQZModel:
 
         training_labels = training_features.pop('SQZ')
         validation_labels = validation_features.pop('SQZ')
+        
+        self.feature_columns = training_features.columns
 
         # shape training data for LSTM
         if neural_network['lstm_dim'] > 0:
+            # TODO:
+
             training_features = training_features.reset_index().drop(
                 columns='gps_time')
             training_labels = training_labels.reset_index().drop(
@@ -207,10 +231,41 @@ class SQZModel:
             )
 
         # save training/validation labels/features in object
-        self.training_labels = training_labels
-        self.training_features = training_features
-        self.validation_labels = validation_labels
-        self.validation_features = validation_features
+        self.raw_data = SQZData(
+            training_features,
+            training_labels,
+            validation_features,
+            validation_labels
+        )
+
+        ###################################################
+        #### compute means and stds for detrending
+
+        # boolean whether to attempt to load existing model
+        loading_model = (save_path is not None and not force_overwrite)
+
+        # create detrender objects, each of which will try to load
+        # existing detrending values (if they exist), else will compute
+        # them and (optionally) save
+        self.features_detrender = Detrender(
+            self.raw_data.training_features,
+            output_file_path / self.DETREND_FEATURES_FILENAME,
+            loading_model
+        )
+
+        self.labels_detrender = Detrender(
+            self.raw_data.training_labels,
+            output_file_path / self.DETREND_LABELS_FILENAME,
+            loading_model
+        )
+
+        # use detrenders to compute detrended data
+        self.detrended_data = SQZData(
+            self.features_detrender.detrend(self.raw_data.training_features),
+            self.labels_detrender.detrend(self.raw_data.training_labels),
+            self.features_detrender.detrend(self.raw_data.validation_features),
+            self.labels_detrender.detrend(self.raw_data.validation_labels)
+        )
 
         ###################################################
         #### compute clusters
@@ -239,60 +294,16 @@ class SQZModel:
             # initialize model
 
             # select training features/labels associated with current cluster
-            sub_training_features = training_features[training_clusters==i]
-            sub_training_labels = training_labels[training_clusters==i]
+            inds = (training_clusters==i)
+            sub_training_features = self.detrended_data.training_features[inds]
+            sub_training_labels = self.detrended_data.training_labels[inds]
 
             # boolean whether there are any validation data points in this
             # cluster
             sub_validation_exists = (validation_clusters==i).sum() > 0
 
-            # set up normalizer layer
-            normalizer = layers.Normalization()
-            normalizer.adapt(np.array(sub_training_features))
-
-            # define internal layers in neural network
-            model = tf.keras.Sequential(
-                # input layer for LSTM
-                (
-                    [] if neural_network['lstm_dim'] == 0
-                    # else [layers.Input(
-                    #     shape=()
-                    # )]
-                    else [] #########
-                )
-                # normalizer
-                + [normalizer]
-                # RFF layer
-                + (
-                    [] if neural_network['rff_dim'] == 0
-                    else [RandomFourierFeatures(
-                        output_dim=neural_network['rff_dim']
-                    )]
-                )
-                # LSTM layers
-                + (
-                    [] if neural_network['lstm_dim'] == 0
-                    else [layers.LSTM(
-                        units=neural_network['lstm_dim'],
-                        stateful=True
-                    )]
-                )
-                # dense layers
-                + [layers.Dense(neural_network['dense_dim'],
-                                activation=neural_network['activation'])
-                    for _ in range(neural_network['dense_layers'])]
-                # final dense layer to single number for squeezing level
-                # estimate
-                + [layers.Dense(1)]
-            )
-
-            model.compile(loss='mean_absolute_error',
-                        optimizer=tf.keras.optimizers.Adam(0.001))
-
             ####################
             # train/load model
-
-            loading_model = (save_path is not None and not force_overwrite)
 
             if save_path is not None:
                 # create subfolder for this sub-network if it doesn't exist
@@ -316,7 +327,7 @@ class SQZModel:
 
                 # if no checkpoints saved 
                 if len(available_epochs) == 0:
-                    model = tf.saved_model.load(str(sub_output_path))
+                    model = tf.keras.models.load_model(str(sub_output_path))
                 else:
                     # use the lowest loss checkpoint
                     ckpt = available_epochs[np.argmin(
@@ -325,9 +336,48 @@ class SQZModel:
                             ), 1]
                         )]
                     
-                    model.load_weights(sub_output_path / f'checkpoint-{ckpt:04d}.hdf5')
+                    model = tf.keras.models.load_model(
+                        sub_output_path / f'checkpoint-{ckpt:04d}.hdf5'
+                    )
             # if loss file doesn't exist and model needs to be trained
             else:
+                # define internal layers in neural network
+                model = tf.keras.Sequential(
+                    # input layer for LSTM
+                    (
+                        [] if neural_network['lstm_dim'] == 0
+                        # else [layers.Input(
+                        #     shape=()
+                        # )]
+                        else [] #########
+                    )
+                    # RFF layer
+                    + (
+                        [] if neural_network['rff_dim'] == 0
+                        else [RandomFourierFeatures(
+                            output_dim=neural_network['rff_dim']
+                        )]
+                    )
+                    # LSTM layers
+                    + (
+                        [] if neural_network['lstm_dim'] == 0
+                        else [layers.LSTM(
+                            units=neural_network['lstm_dim'],
+                            stateful=True
+                        )]
+                    )
+                    # dense layers
+                    + [layers.Dense(neural_network['dense_dim'],
+                                    activation=neural_network['activation'])
+                        for _ in range(neural_network['dense_layers'])]
+                    # final dense layer to single number for squeezing level
+                    # estimate
+                    + [layers.Dense(1)]
+                )
+
+                model.compile(loss='mean_absolute_error',
+                            optimizer=tf.keras.optimizers.Adam(0.001))
+
                 # set verbosity level for training
                 is_verbose = (logging.root.level <= logging.DEBUG) or show_progress
 
@@ -338,7 +388,7 @@ class SQZModel:
                     steps_per_epoch = max(
                         sub_training_labels.size / batch_size, 1
                     )
-                    checkpoint_path = sub_output_path / 'checkpoint-{epoch:04d}.hdf5'
+                    checkpoint_path = sub_output_path / 'checkpoint-{epoch:04d}.ckpt'
                     
                     callbacks_list = ([
                         callbacks.ModelCheckpoint(checkpoint_path,
@@ -354,12 +404,14 @@ class SQZModel:
                     'batch_size': batch_size
                 }
                 if neural_network['lstm_dim'] > 0:
+                    # TODO:
                     model.fit(training_dataset, validation_data=val_dataset, **fit_args)
                 else:
                     if sub_validation_exists:
+                        inds = (validation_clusters==i)
                         fit_args['validation_data'] = (
-                            validation_features[validation_clusters==i],
-                            validation_labels[validation_clusters==i]
+                            self.detrended_data.validation_features[inds],
+                            self.detrended_data.validation_labels[inds]
                         )
 
                     model.fit(
@@ -380,6 +432,10 @@ class SQZModel:
                                     if sub_validation_exists else
                                     np.zeros( len(cur_loss) )
                                     )).T
+
+                # re-scale loss history by label std
+                loss_history *= self.labels_detrender.std
+
                 if save_path is not None:
                     np.savetxt(loss_path, loss_history,
                             header='loss val_loss')
@@ -415,18 +471,27 @@ class SQZModel:
             if save_path is not None:
                 self.save_avg_loss(avg_loss_filepath)
 
+    ################################################
+    #### predict squeezing level using trained model
     def estimate_sqz(self, features):
+        # transpose if given a single point
+        if features.ndim == 1:
+            if not isinstance(features, np.ndarray):
+                features = np.array(features)
+            features = features[np.newaxis, :]
+        
         # convert feature values to DataFrame if not already
-        features = pd.DataFrame(features, columns=self.training_features.columns)
+        features = pd.DataFrame(features, columns=self.feature_columns)
 
-        # detrend data
-        norm_features = self.detrend(features)
+        # detrend provided data
+        detrended_features = self.features_detrender.detrend(features)
 
         # interpolate between cluster centers to produce final estimate
         if self.interpolate:
             # compute sqz estimate from each model
             sqz_ests = [
-                -model.predict(features).flatten() for model in self.models
+                model.predict(detrended_features).flatten()
+                for model in self.models
             ]
 
             # compute distances for each data point from each cluster
@@ -434,7 +499,7 @@ class SQZModel:
             distances = np.zeros( (self.cluster_count, features.shape[0]) )
             for i in range(self.cluster_count):
                 distances[i,:] = np.sqrt(
-                    np.square(norm_features - self.clusters.loc[i]).sum(axis=1)
+                    np.square(detrended_features - self.clusters.loc[i]).sum(axis=1)
                 )
             # use inverse distance as weighting for model
             weights = 1 / distances
@@ -444,19 +509,22 @@ class SQZModel:
         # a single model to predict
         else:
             # calculate clusters for each data point
-            labels = self.kmeans.predict(norm_features)
+            labels = self.kmeans.predict(detrended_features)
             
             # initialize array for sqz estimate
             sqz_est = np.zeros(labels.shape)
 
             for i in range(self.cluster_count):
                 if (labels==i).sum() > 0:
-                    sqz_est[labels==i] = -(
-                        self.models[i].predict(features[labels==i]).flatten()
+                    sqz_est[labels==i] = (
+                        self.models[i].predict(detrended_features[labels==i])
+                        .flatten()
                     )
 
-        return sqz_est
+        return self.labels_detrender.retrend(sqz_est)
     
+    ################################################
+    #### sensitivity analysis functions
     def sobol(self, N=1000):
         '''
         Computes Sobol indices for current model.
@@ -473,11 +541,11 @@ class SQZModel:
         '''
         # define number of parameters and bounds
         sobol_problem = {
-            'num_vars': len(self.training_features.columns),
-            'names': self.training_features.columns,
+            'num_vars': self.feature_columns.shape,
+            'names': self.feature_columns,
             'bounds': list(zip(
-                self.training_features.min().to_list(),
-                self.training_features.max().to_list()
+                self.detrended_data.training_features.min().to_list(),
+                self.detrended_data.training_features.max().to_list()
             ))
         }
 
@@ -511,13 +579,21 @@ class SQZModel:
 
         # use median of training features if no point given and no clustering
         if point is None and self.cluster_count == 1:
-            point = [self.training_features.median().to_frame().T]
+            point = [self.detrended_data.training_features.median().to_frame().T]
         # use cluster medians if clustering
         elif point is None:
             point = [self.clusters.iloc[i].to_frame().T 
                         for i in range(self.cluster_count)]
-        # duplicate given point by number of clusters
         else:
+            # transpose if given 1D array
+            if point.ndim == 1:
+                if not isinstance(point, np.ndarray):
+                    point = np.array(point)
+                point = point[np.newaxis, :]
+            
+            point = self.features_detrender.detrend(point)
+
+            # duplicate given point by number of clusters
             point = [point]*self.cluster_count
         
         gradients = [None]*self.cluster_count
@@ -525,17 +601,22 @@ class SQZModel:
             # compute gradient at given point
             if numerical:
                 # set up gradient array for results
-                gradient = np.zeros((1, self.training_features.columns.size))
+                gradient = np.zeros(
+                    (1, self.feature_columns.size)
+                )
 
                 # compute sqz estimate at the point of interest
                 est_mid = self.models[i](point[i])
 
                 # iterate over all channels
-                for j, c in enumerate(self.training_features.columns):
+                for j, c in enumerate(self.feature_columns):
                     # use some fraction of the channel std for the finite
                     # difference computation
-                    h = (self.training_features[self.training_clusters==i][c]
-                            .std() / NUMERICAL_STD_FRACTION)
+                    h = (
+                        self.detrended_data.training_features
+                        [self.training_clusters==i][c]
+                        .std() / NUMERICAL_STD_FRACTION
+                    )
 
                     # compute the sqz estimate at offsets from the point of
                     # interest
@@ -563,18 +644,23 @@ class SQZModel:
 
                 gradient = self.__gradient_tape(self.models[i], tf_point[i], depth).numpy()
 
+            # retrend to convert back to gradient in units of SQZ dB
+            # and original channels
+            gradient = gradient * self.labels_detrender.std[0]
+            gradient = gradient / (self.features_detrender.std)**depth
+
             # optionally normalize by standard deviation of channels
+            # within this cluster
             if normalize:
                 # use standard deviation within the specific cluster
                 gradient = gradient * (
-                    self.training_features[self.training_clusters==i]
+                    self.raw_data.training_features[self.training_clusters==i]
                     .std().to_numpy()
                 )**depth
         
             # convert to dataframe
-            # negative gradient since internal model maps to negative sqz
             gradient_df = pd.DataFrame(
-                - gradient, columns=self.training_features.columns
+                gradient, columns=self.feature_columns
             ).T.reset_index()
             gradient_df = gradient_df.rename(columns={'index': 'Channel', 0: f'Gradient'})
 

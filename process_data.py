@@ -33,7 +33,8 @@ def process_data(sqz_path, aux_path, processed_path, ifo_lock_channels,
                  ifo, channels, cut_channels, min_lock=600, **kwargs):
     # load data from files
     aux_data = pd.read_csv(aux_path, index_col=TIME_COL)
-    sqz_data = pd.read_csv(sqz_path, index_col=TIME_COL)
+    # make "squeezing" level positive
+    sqz_data = -pd.read_csv(sqz_path, index_col=TIME_COL)
     
     # get sqz column names
     sqz_columns = list(sqz_data.columns)
@@ -48,7 +49,7 @@ def process_data(sqz_path, aux_path, processed_path, ifo_lock_channels,
 
     # remove any remaining rows where any squeeze BLRMS exceeds 0 dB
     non_sqz_indices = np.where(np.logical_and.reduce(
-        [sqz_data[c] > 0 for c in sqz_columns]
+        [sqz_data[c] < 0 for c in sqz_columns]
     ))
     non_sqz_times = sqz_data.index[non_sqz_indices]
     sqz_data.drop(non_sqz_times, inplace=True)

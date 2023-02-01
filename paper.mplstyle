@@ -1,4 +1,4 @@
-figure.figsize: 14, 7
+figure.figsize: 16, 9
 
 axes.xmargin: 0
 
