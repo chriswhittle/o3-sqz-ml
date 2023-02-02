@@ -408,10 +408,14 @@ class SQZModel:
             else:
                 # define internal layers in neural network
                 model = tf.keras.Sequential(
+                    # pre-dense layers
+                    [layers.Dense(neural_network['dense_dim'],
+                                    activation=neural_network['activation'])
+                        for _ in range(neural_network['pre_dense_layers'])]
                     # RFF layer
                     # include if non-zero dimension specified or if RNN
                     # (in which case neural network accepts time series)
-                    (
+                    + (
                         [] if (neural_network['rff_dim'] == 0 or
                         neural_network['rnn']['type'] in RNN_TYPES)
                         else [RandomFourierFeatures(
