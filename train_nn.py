@@ -90,6 +90,8 @@ class SQZModel:
     CLUSTERS_FILENAME = 'clusters.csv'
     CLUSTERS_ABS_FILENAME = 'clusters_abs.csv'
 
+    TIME_STEP = 60
+
     ################################################
     #### helper function for saving training history
     def save_avg_loss(self, save_path):
@@ -103,18 +105,51 @@ class SQZModel:
     #### helper function for building datasets for
     #### RNN input
     def build_sequence_dataset(self, features, labels=None):
-        # convert to numpy arrays so tf timeseries generation does correct
-        # indexing
-        features = np.array(features)
-        labels = np.array(features)
+        # handle gaps in data to avoid windows spanning more than nominal time
+        # step
+        if (isinstance(features, pd.DataFrame) and 
+            (labels is None or isinstance(labels, pd.DataFrame))):
+            # build contiguous time series
+            full_times = np.arange(
+                features.index[0], features.index[-1], self.TIME_STEP
+            )
 
-        return tf.keras.utils.timeseries_dataset_from_array(
-            features,
-            labels[self.lookback-1:],
-            self.lookback,
-            sequence_stride=1,
-            batch_size=self.batch_size
-        )
+            # add NaNs where there are gaps in data
+            contiguous_features = features.reindex(full_times, fill_value=np.nan)
+
+            # produce sliding window with [window, window_size, features]
+            sliding = np.lib.stride_tricks.sliding_window_view(
+                contiguous_features, self.lookback, axis=0
+            )
+            sliding = np.swapaxes(sliding, 1, 2)
+
+            # generate boolean mask for windows that can be kept (i.e. no NaNs)
+            nan_mask = ~np.isnan(sliding).any(axis=(1,2))
+            features_ds = sliding[nan_mask, :, :]
+            
+            # mask labels dataframe if given
+            if labels is not None:
+                contiguous_labels = labels.reindex(full_times, fill_value=np.nan)
+                sliding_labels = contiguous_labels.iloc[self.lookback-1,:]
+                labels_ds = sliding_labels[nan_mask]
+            
+                return (features_ds, labels_ds)
+            else:
+                return (features_ds,)
+        # otherwise just use tensorflow dataset generator
+        else:
+            # convert to numpy arrays so tf timeseries generation does correct
+            # indexing
+            features = np.array(features)
+            labels = np.array(features)
+
+            return tf.keras.utils.timeseries_dataset_from_array(
+                features,
+                labels[self.lookback-1:],
+                self.lookback,
+                sequence_stride=1,
+                batch_size=self.batch_size
+            )
 
     ################################################
     #### cluster computation
@@ -425,13 +460,27 @@ class SQZModel:
                     'callbacks':callbacks_list,
                     'batch_size': batch_size
                 }
+
                 if neural_network['rnn']['type'] in RNN_TYPES:
-                    model.fit(
-                        self.training_rnn_ds,
-                        validation_data=self.validation_rnn_ds,
-                        **fit_args
-                    )
+                    # if RNN, check if generate a tensorflow dataset:
+                    # if so, just use dataset as argument
+                    if isinstance(self.training_rnn_ds, tf.data.Dataset):
+                        model.fit(
+                            self.training_rnn_ds,
+                            validation_data=self.validation_rnn_ds,
+                            **fit_args
+                        )
+                    # otherwise grab elements from tuple
+                    else:
+                        model.fit(
+                            self.training_rnn_ds[0],
+                            self.training_rnn_ds[1],
+                            validation_data=self.validation_rnn_ds,
+                            **fit_args
+                        )
+
                 else:
+                    # just input features and labels if non-RNN
                     if sub_validation_exists:
                         inds = (validation_clusters==i)
                         fit_args['validation_data'] = (
@@ -512,6 +561,7 @@ class SQZModel:
         detrended_features = self.features_detrender.detrend(features)
         
         # handle RNN
+        # assumes contiguous (i.e. uniformly spaced data)
         if self.lookback > 0:
             # if RNN and datapoints given is less than lookback, throw error
             if features.shape[0] < self.lookback:
