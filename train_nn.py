@@ -112,7 +112,8 @@ class SQZModel:
             features,
             labels[self.lookback-1:],
             self.lookback,
-            sequence_stride=1
+            sequence_stride=1,
+            batch_size=self.batch_size
         )
 
     ################################################
@@ -273,6 +274,8 @@ class SQZModel:
         ###################################################
         #### produce shifted datasets for RNNs
 
+        self.batch_size = batch_size
+
         # shape training data for LSTM
         if neural_network['rnn']['type'] in RNN_TYPES:
             self.lookback = neural_network['rnn']['lookback']
@@ -404,7 +407,8 @@ class SQZModel:
                     callbacks_list = []
                 else:
                     steps_per_epoch = max(
-                        sub_training_labels.size / batch_size, 1
+                        (sub_training_labels.size - (self.lookback-1)) 
+                        / batch_size, 1
                     )
                     checkpoint_path = sub_output_path / 'checkpoint-{epoch:04d}.ckpt'
                     
