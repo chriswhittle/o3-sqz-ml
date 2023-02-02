@@ -29,6 +29,7 @@ from sklearn.cluster import KMeans
 RNN_TYPES = {
     'lstm': tf.keras.layers.LSTM
 }
+PD_TYPES = (pd.DataFrame, pd.Series)
 
 def load_data(processed_path, nominal_blrms_lims, channels,
                 cut_channels, **kwargs):
@@ -107,8 +108,8 @@ class SQZModel:
     def build_sequence_dataset(self, features, labels=None, times=False):
         # handle gaps in data to avoid windows spanning more than nominal time
         # step
-        if (isinstance(features, pd.DataFrame) and 
-            (labels is None or isinstance(labels, pd.DataFrame))):
+        if (isinstance(features, PD_TYPES) and 
+            (labels is None or isinstance(labels, PD_TYPES))):
             # build contiguous time series
             full_times = np.arange(
                 features.index[0], features.index[-1], self.TIME_STEP
@@ -490,7 +491,7 @@ class SQZModel:
                 fit_args = {
                     'verbose': is_verbose,
                     'epochs': neural_network['epochs'],
-                    'callbacks':callbacks_list,
+                    'callbacks': callbacks_list,
                     'batch_size': batch_size
                 }
 
