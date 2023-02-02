@@ -7,6 +7,7 @@ import yaml
 import logging
 
 import numpy as np
+import pandas as pd
 
 from slurm import submit_jobs
 from train_nn import SQZModel
@@ -19,7 +20,7 @@ Run by calling deploy function or from commandline with:
 `python deploy_jobs.py main config.yaml savepath parameter1 start1 end1 count1 parameter2 start2 end2 count2 ...`
 for making numerical ranges for given parameters, or
 `python deploy_jobs.py main config.yaml savepath parameter1 value1/value2/...`
-for setting a list of parameter values.
+for setting a list of parameter values. This can be used to set a parameter to a single value with a trailing slash: `parameter_name 1/`.
 
 Parameters that live in nested dictionaries can be addressed as, e.g. `nested/dict/keys`.
 
@@ -36,6 +37,11 @@ If you only want to produce the parameter file (i.e. don't send jobs to slurm), 
 
 # label for special 'duration' parameter
 DURATION_LABEL = 'duration'
+
+# threshold for which a segment is considered valid
+DATA_THRESHOLD = 0.5
+# time step for data
+TIME_STEP = 60
 
 # get path to source directory
 source_directory = Path(os.path.dirname(os.path.abspath(__file__)))
@@ -88,7 +94,7 @@ def deploy_aux(job_params, config_spans):
     # do next layer of iteration
     return deploy_aux(new_job_params, config_spans[1:])
 
-def deploy(save_path, lightweight, nodeploy, config_spans, config):
+def deploy(save_path, lightweight, nodeploy, config_spans, config, check_data=True):
     '''
     Function to create points in specified parameter range and submit jobs
     with SLURM.
@@ -103,6 +109,8 @@ def deploy(save_path, lightweight, nodeploy, config_spans, config):
      - end = final value for parameter span
      - count = number of points with which to span this range
     config = standard dictionary of model parameters
+    check_data = whether to load in data and check that a time segment
+    generated from a duration fraction actually has sufficient data
     '''
     
     # ensure save path exists
@@ -111,6 +119,12 @@ def deploy(save_path, lightweight, nodeploy, config_spans, config):
 
     # initialize list of individual job parameters
     init_config_spans = [{}]
+
+    # if doing data check, load in dataframe
+    if check_data:
+        logging.info('Loading data for interval checking...')
+        data = pd.read_csv(config['processed_path'], index_col='gps_time')
+        data_times = data.index
 
     #### handle custom span for `duration`
     # duration = fraction of full time segment to use for training
@@ -128,19 +142,39 @@ def deploy(save_path, lightweight, nodeploy, config_spans, config):
         # iterate over duration fractions and build segment start/end GPS times
         init_config_spans = []
         for f in duration_values:
+            # for data checking: maximum possible number of samples in 
+            # this interval length
+            samples_threshold = int(
+                DATA_THRESHOLD * full_segment_length * f / TIME_STEP
+            )
+
             # iterate over all fractions of full segment
             for start_f in np.arange(0, 1, f):
                 # starting GPS timestamp
                 sub_start_gps = int(
                     config['start_gps'] + full_segment_length * start_f
                 )
+                sub_end_gps = sub_start_gps + int(full_segment_length * f)
+
+                # if doing data check, check how many samples are actually in
+                # interval and compare to maximum possible
+                run_interval = True
+                if check_data:
+                    samples_count = np.logical_and(
+                        data_times >= sub_start_gps,
+                        data_times <= sub_end_gps
+                    ).sum()
+                    if samples_count < samples_threshold:
+                        run_interval = False
+                        logging.info(f'Interval ({sub_start_gps}, {sub_end_gps}) rejected ({samples_count} < {samples_threshold} samples)')
 
                 # save GPS start and end timestamps
-                init_config_spans += [{
-                    'duration': f,
-                    'sub_start_gps': sub_start_gps,
-                    'sub_end_gps': sub_start_gps + int(full_segment_length * f)
-                }]
+                if run_interval:
+                    init_config_spans += [{
+                        'duration': f,
+                        'sub_start_gps': sub_start_gps,
+                        'sub_end_gps': sub_end_gps
+                    }]
 
         # remove duration config span
         config_spans.pop(duration_ind)
@@ -224,7 +258,6 @@ def sub_job(save_path, lightweight, job_num, config):
                 
                 parent = parent[k]
     
-    return
     config.update(job_params)
 
     # if sub GPS start/end is not specified, set to full segment
