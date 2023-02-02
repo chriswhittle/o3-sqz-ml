@@ -17,10 +17,17 @@ parameter space.
 
 Run by calling deploy function or from commandline with:
 `python deploy_jobs.py main config.yaml savepath parameter1 start1 end1 count1 parameter2 start2 end2 count2 ...`
-OR
-`python deploy_jobs.py main config.yaml savepath parameter1 value1,value2,...`
+for making numerical ranges for given parameters, or
+`python deploy_jobs.py main config.yaml savepath parameter1 value1/value2/...`
+for setting a list of parameter values.
 
-`python deploy_jobs.py $jobId config.yaml savepath` for the jobs
+Parameters that live in nested dictionaries can be addressed as, e.g. `nested/dict/keys`.
+
+List values can be set as e.g. `parameter_name 1,2/1,2,3,4/5,6,7`.
+
+Run
+`python deploy_jobs.py $jobId config.yaml savepath`
+for the jobs
 
 If the jobs should be lightweight (i.e. don't save the models), add a --light flag at the end.
 
@@ -137,9 +144,7 @@ def deploy(save_path, lightweight, nodeploy, config_spans, config):
 
         # remove duration config span
         config_spans.pop(duration_ind)
-        print(duration_values)
-
-    print(init_config_spans)
+        logging.info(f'Producing jobs with duration fractions = {duration_values}')
 
     #### build parameter spans
     job_params = deploy_aux(init_config_spans, config_spans)
@@ -188,15 +193,37 @@ def sub_job(save_path, lightweight, job_num, config):
                     line_params[1::2], line_params[2::2]
                 ))
     
-    # fix types based on type of value in config file
-    for p in job_params:
-        for type in [float, int]:
-            if p in config and isinstance(config[p], type):
-                job_params[p] = type(job_params[p])
-    
+
     # update config file with new values
-    # TODO: handle parameters that are in nested dictionaries
-    print(job_params)
+    logging.info(f'Updating config with: {job_params}')
+    
+    # iterate and set each job parameter
+    for p in job_params:
+        # get nested keys
+        keys = p.split('/')
+        parent = config
+
+        # recurse into dictionaries to set value and also check type
+        for i, k in enumerate(keys):
+            if i == len(keys)-1:
+                # fix type based on type of value written in config file
+                # if list, split into values (assume int elements)
+                if isinstance(parent[k], list) or ',' in job_params[p]:
+                    job_params[p] = [int(val) for val in job_params[p].split(',')]
+                # if int/float, perform cast
+                else:
+                    for type in [float, int]:
+                        if p in config and isinstance(config[p], type):
+                            job_params[p] = type(job_params[p])
+
+                # set value in config dictionary
+                parent[k] = job_params[p]
+            else:
+                if k not in parent:
+                    parent[k] = {}
+                
+                parent = parent[k]
+    
     return
     config.update(job_params)
 
@@ -252,11 +279,12 @@ if __name__ == "__main__":
         span_keys = ['param', 'start', 'end', 'count']
         while arg_ind < len(args):
             # handle case with list of values
-            if ',' in args[arg_ind+1]:
-                values = args[arg_ind+1].split(',')
+            if '/' in args[arg_ind+1]:
+                values = args[arg_ind+1].split('/')
                 # remove blank options to allow for setting config parameter
                 # to a single value
-                values.remove('')
+                if '' in values:
+                    values.remove('')
 
                 config_spans += [
                     {'param': args[arg_ind], 'values': values}
