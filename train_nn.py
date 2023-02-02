@@ -104,7 +104,7 @@ class SQZModel:
     ################################################
     #### helper function for building datasets for
     #### RNN input
-    def build_sequence_dataset(self, features, labels=None):
+    def build_sequence_dataset(self, features, labels=None, times=False):
         # handle gaps in data to avoid windows spanning more than nominal time
         # step
         if (isinstance(features, pd.DataFrame) and 
@@ -125,12 +125,18 @@ class SQZModel:
 
             # generate boolean mask for windows that can be kept (i.e. no NaNs)
             nan_mask = ~np.isnan(sliding).any(axis=(1,2))
+
+            # if caller only cares about time series, mask into times and return
+            if times:
+                return full_times[self.lookback-1:][nan_mask]
+
+            # mask features to be returned
             features_ds = sliding[nan_mask, :, :]
             
             # mask labels dataframe if given
             if labels is not None:
                 contiguous_labels = labels.reindex(full_times, fill_value=np.nan)
-                sliding_labels = contiguous_labels.iloc[self.lookback-1,:]
+                sliding_labels = contiguous_labels.iloc[self.lookback-1:]
                 labels_ds = sliding_labels[nan_mask]
             
                 return (features_ds, labels_ds)
