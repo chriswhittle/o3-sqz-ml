@@ -227,10 +227,11 @@ class SQZModel:
         # save_path = None => nothing saved
 
 
-        # throw error if clustered neural network and RNN
-        if cluster_count > 1 and neural_network['rnn']['type'] in RNN_TYPES:
+        # throw error if clustered neural network and RNN/CNN
+        if cluster_count > 1 and (neural_network['rnn']['type'] in RNN_TYPES or
+            neural_network['cnn']['dim'] > 0):
             raise RuntimeError(
-                'Cannot use clustered neural networks with RNN.'
+                'Cannot use clustered neural networks with RNN/CNN.'
             )
 
         ###################################################
@@ -317,9 +318,10 @@ class SQZModel:
 
         self.batch_size = batch_size
 
-        # shape training data for LSTM
-        if neural_network['rnn']['type'] in RNN_TYPES:
-            self.lookback = neural_network['rnn']['lookback']
+        # shape training/validation data for RNN/CNN
+        if (neural_network['rnn']['type'] in RNN_TYPES or
+            neural_network['cnn']['dim'] > 0):
+            self.lookback = neural_network['lookback']
             self.training_rnn_ds = self.build_sequence_dataset(
                 self.detrended_data.training_features,
                 self.detrended_data.training_labels
@@ -406,40 +408,57 @@ class SQZModel:
                     )
             # if loss file doesn't exist and model needs to be trained
             else:
-                # define internal layers in neural network
-                model = tf.keras.Sequential(
-                    # pre-dense layers
-                    [layers.Dense(neural_network['dense_dim'],
-                                    activation=neural_network['activation'])
-                        for _ in range(neural_network['pre_dense_layers'])]
-                    # RFF layer
-                    # include if non-zero dimension specified or if RNN
-                    # (in which case neural network accepts time series)
-                    + (
-                        [] if (neural_network['rff_dim'] == 0 or
-                        neural_network['rnn']['type'] in RNN_TYPES)
-                        else [RandomFourierFeatures(
-                            output_dim=neural_network['rff_dim']
+                # define sequence of layers for neural network
+                sequence = []
+
+                # pre-dense layers
+                sequence += [layers.Dense(neural_network['dense_dim'], 
+                        activation=neural_network['activation'])
+                    for _ in range(neural_network['pre_dense_layers'])]
+                    
+                # RFF layer
+                # include if non-zero dimension specified or if RNN/CNN
+                # (in which case neural network accepts time series)
+                if (neural_network['rff_dim'] == 0 and
+                        neural_network['rnn']['type'] not in RNN_TYPES and
+                        neural_network['cnn']['dim'] > 0):
+                    sequence += [RandomFourierFeatures(
+                        output_dim=neural_network['rff_dim']
+                    )]
+                # RNN layers
+                elif neural_network['rnn']['type'] in RNN_TYPES:
+                    sequence += [RNN_TYPES[neural_network['rnn']['type']](
+                        units=neural_network['rnn']['dim']
+                    )]
+                # CNN layers
+                elif neural_network['cnn']['dim'] > 0:
+                    for j, ks in enumerate(neural_network['cnn']['kernel_sizes']):
+                        cnn_args = {}
+
+                        # first layer of CNN needs input shape
+                        if i == 0:
+                            cnn_args = { #TODO: change if pre-dense layers?
+                                'input_shape': (self.lookback,
+                                                len(self.feature_columns))
+                            }
+
+                        sequence += [layers.Conv1D(
+                            neural_network['cnn']['dim'],
+                            ks,
+                            **cnn_args
                         )]
-                    )
-                    # RNN layers
-                    + (
-                        [
-                            RNN_TYPES[neural_network['rnn']['type']](
-                                units=neural_network['rnn']['dim']
-                            )
-                        ]
-                        if neural_network['rnn']['type'] in RNN_TYPES
-                        else []
-                    )
-                    # dense layers
-                    + [layers.Dense(neural_network['dense_dim'],
-                                    activation=neural_network['activation'])
-                        for _ in range(neural_network['dense_layers'])]
-                    # final dense layer to single number for squeezing level
-                    # estimate
-                    + [layers.Dense(1)]
-                )
+                
+                # dense layers
+                sequence += [layers.Dense(neural_network['dense_dim'],
+                        activation=neural_network['activation'])
+                    for _ in range(neural_network['dense_layers'])]
+
+                # final dense layer to single number for squeezing level
+                # estimate
+                sequence += [layers.Dense(1)]
+
+                # define neural network
+                model = tf.keras.Sequential(sequence)
 
                 model.compile(loss='mean_absolute_error',
                             optimizer=tf.keras.optimizers.Adam(0.001))
@@ -471,7 +490,7 @@ class SQZModel:
                     'batch_size': batch_size
                 }
 
-                if neural_network['rnn']['type'] in RNN_TYPES:
+                if self.lookback > 0:
                     # if RNN, check if generate a tensorflow dataset:
                     # if so, just use dataset as argument
                     if isinstance(self.training_rnn_ds, tf.data.Dataset):
