@@ -23,6 +23,8 @@ OR
 `python deploy_jobs.py $jobId config.yaml savepath` for the jobs
 
 If the jobs should be lightweight (i.e. don't save the models), add a --light flag at the end.
+
+If you only want to produce the parameter file (i.e. don't send jobs to slurm), add a --nodeploy flag at the end.
 '''
 
 # label for special 'duration' parameter
@@ -35,6 +37,10 @@ source_directory = Path(os.path.dirname(os.path.abspath(__file__)))
 SUBMIT_FILENAME = 'batch.sh'
 # filename for parameter able
 PARAM_FILENAME = 'params.txt'
+
+# commandline flags
+LIGHTWEIGHT_FLAG = '--light'
+NODEPLOY_FLAG = '--nodeploy'
 
 def build_span(span):
     '''
@@ -75,7 +81,7 @@ def deploy_aux(job_params, config_spans):
     # do next layer of iteration
     return deploy_aux(new_job_params, config_spans[1:])
 
-def deploy(save_path, lightweight, config_spans, config):
+def deploy(save_path, lightweight, nodeploy, config_spans, config):
     '''
     Function to create points in specified parameter range and submit jobs
     with SLURM.
@@ -157,10 +163,12 @@ def deploy(save_path, lightweight, config_spans, config):
 
     #### submit jobs
     submit_path = Path(save_path) / SUBMIT_FILENAME
-    logging.debug(f'Building submit file at {submit_path} and submitting...')
-    submit_jobs(num_jobs, __file__, 'batch',
-                submit_path, str(save_path) + ' --light' if lightweight else '',
-                config)
+    logging.debug(f'Building submit file at {submit_path}...')
+
+    logging.debug('Submitting...')
+    submit_jobs(num_jobs, __file__, 'batch', 
+                submit_path, str(save_path) + LIGHTWEIGHT_FLAG if lightweight else '',
+                config, nodeploy)
 
 def sub_job(save_path, lightweight, job_num, config):
     '''
@@ -188,6 +196,8 @@ def sub_job(save_path, lightweight, job_num, config):
     
     # update config file with new values
     # TODO: handle parameters that are in nested dictionaries
+    print(job_params)
+    return
     config.update(job_params)
 
     # if sub GPS start/end is not specified, set to full segment
@@ -218,10 +228,14 @@ if __name__ == "__main__":
     save_path = args[3]
 
     # check for lightweight flag
-    LIGHTWEIGHT_FLAG = '--light'
     lightweight = LIGHTWEIGHT_FLAG in args
     if lightweight:
         args.remove(LIGHTWEIGHT_FLAG)
+
+    # check for nodeploy flag
+    nodeploy = NODEPLOY_FLAG in args
+    if nodeploy:
+        args.remove(NODEPLOY_FLAG)
 
     # load config file given in command line
     with open(args[2]) as config_file:
@@ -255,7 +269,7 @@ if __name__ == "__main__":
                 ]
                 arg_ind += len(span_keys)
 
-        deploy(save_path, lightweight, config_spans, config)
+        deploy(save_path, lightweight, nodeploy, config_spans, config)
     else:
         # individual generation member job
         job_num = int(sys.argv[1])

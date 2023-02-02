@@ -8,7 +8,7 @@ SUBMIT_STUB_NAME = 'submit_stub.txt'
 source_directory = Path(os.path.dirname(os.path.abspath(__file__)))
 
 def submit_jobs(num_jobs, script_path, log_tag,
-                submit_path, script_args = '', config = {}):
+                submit_path, script_args = '', config = {}, nodeploy=False):
     '''
     Generate new slurm submit script based on given parameters and then use it
     to submit jobs.
@@ -19,6 +19,7 @@ def submit_jobs(num_jobs, script_path, log_tag,
     submit_path = path of new submit file
     script_args = additional commandline arguments to add after config file
     config = standard config dictionary, including nodes to be excluded
+    nodeploy = make submit file but don't submit
     '''
     # copy content of submit stub
     submit_stub_path = source_directory / Path(SUBMIT_STUB_NAME)
@@ -59,7 +60,10 @@ def submit_jobs(num_jobs, script_path, log_tag,
         )
     
     # submit jobs and extract job ID
-    submit_string = os.popen(f'LLsub {submit_path}').read()
-    job_id = int(submit_string.split(' ')[-1].replace('\n', ''))
+    if nodeploy:
+        return None
+    else:
+        submit_string = os.popen(f'LLsub {submit_path}').read()
+        job_id = int(submit_string.split(' ')[-1].replace('\n', ''))
 
-    return job_id
+        return job_id
