@@ -295,13 +295,15 @@ class SQZModel:
         # them and (optionally) save
         self.features_detrender = Detrender(
             self.raw_data.training_features,
-            output_file_path / self.DETREND_FEATURES_FILENAME,
+            (output_file_path / self.DETREND_FEATURES_FILENAME
+            if save_path is not None else None),
             loading_model
         )
 
         self.labels_detrender = Detrender(
             self.raw_data.training_labels,
-            output_file_path / self.DETREND_LABELS_FILENAME,
+            (output_file_path / self.DETREND_LABELS_FILENAME
+            if save_path is not None else None),
             loading_model
         )
 
