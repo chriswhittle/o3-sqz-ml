@@ -341,7 +341,9 @@ class SQZModel:
 
         ( clusters, training_clusters,
             validation_clusters ) = self.compute_clusters(
-                cluster_count, save_path, output_file_path
+                cluster_count,
+                save_path,
+                output_file_path if save_path is not None else None
         )
         
         ###################################################
