@@ -61,6 +61,7 @@ PARAM_FILENAME = 'params.txt'
 # commandline flags
 LIGHTWEIGHT_FLAG = '--light'
 NODEPLOY_FLAG = '--nodeploy'
+NODELETE_FLAG = '--nodelete'
 
 def build_span(span):
     '''
@@ -184,7 +185,7 @@ def deploy(save_path, lightweight, nodeploy, config_spans, config, check_data=Tr
                 # save GPS start and end timestamps
                 if run_interval:
                     init_config_spans += [{
-                        'duration': f,
+                        DURATION_LABEL: f,
                         'sub_start_gps': sub_start_gps,
                         'sub_end_gps': sub_end_gps
                     }]
@@ -195,20 +196,41 @@ def deploy(save_path, lightweight, nodeploy, config_spans, config, check_data=Tr
 
     #### build parameter spans
     job_params = deploy_aux(init_config_spans, config_spans)
-    num_jobs = len(job_params)
+    final_job_params = []
 
     # fix parameter values to ints according to config values
     for job in job_params:
         for p in job:
             if p in config and isinstance(config[p], int):
                 job[p] = int(job[p])
+        
+
+        # post-processing checks on job parameters:
+        job_ok = True
+
+        # ensure sequential 1D convolution layers reduce to output size 1
+        # before dense layers
+        if ('neural_network/lookback' in job and
+            'neural_network/cnn/kernel_sizes' in job):
+            kernel_sizes = job['neural_network/cnn/kernel_sizes']
+            kernel_sizes = np.array([int(s) for s in kernel_sizes.split(',')])
+
+            if int(job['neural_network/lookback'])-1 != (kernel_sizes-1).sum():
+                job_ok = False
+        
+        # if passed all checks, add to final list of jobs
+        if job_ok:
+            final_job_params += [job]
+
+    # count final number of jobs
+    num_jobs = len(final_job_params)
 
     logging.info(f'Built parameters for {num_jobs} jobs')
 
     # write jobs and parameters to file
     parameter_table_path = save_path / PARAM_FILENAME
     with open(parameter_table_path, 'w') as parameter_table:
-        for i, job in enumerate(job_params):
+        for i, job in enumerate(final_job_params):
             parameter_table.write(
                 f"{i} {' '.join([f'{k} {v}' for k, v in job.items()])}\n"
             )
@@ -219,7 +241,8 @@ def deploy(save_path, lightweight, nodeploy, config_spans, config, check_data=Tr
 
     logging.debug('Submitting...')
     submit_jobs(num_jobs, __file__, 'batch', 
-                submit_path, str(save_path) + LIGHTWEIGHT_FLAG if lightweight else '',
+                submit_path,
+                str(save_path) + (' ' + LIGHTWEIGHT_FLAG) if lightweight else '',
                 config, nodeploy)
 
 def sub_job(save_path, lightweight, job_num, config):
@@ -243,7 +266,7 @@ def sub_job(save_path, lightweight, job_num, config):
 
     # update config file with new values
     logging.info(f'Updating config with: {job_params}')
-    
+
     # iterate and set each job parameter
     for p in job_params:
         # get nested keys
@@ -255,12 +278,12 @@ def sub_job(save_path, lightweight, job_num, config):
             if i == len(keys)-1:
                 # fix type based on type of value written in config file
                 # if list, split into values (assume int elements)
-                if isinstance(parent[k], list) or ',' in job_params[p]:
+                if (k in parent and isinstance(parent[k], list)) or ',' in job_params[p]:
                     job_params[p] = [int(val) for val in job_params[p].split(',')]
                 # if int/float, perform cast
                 else:
                     for type in [float, int]:
-                        if p in config and isinstance(config[p], type):
+                        if k in parent and isinstance(parent[k], type):
                             job_params[p] = type(job_params[p])
 
                 # set value in config dictionary
@@ -271,8 +294,6 @@ def sub_job(save_path, lightweight, job_num, config):
                 
                 parent = parent[k]
     
-    config.update(job_params)
-
     # if sub GPS start/end is not specified, set to full segment
     for l in ['start_gps', 'end_gps']:
         if f'sub_{l}' not in config:
@@ -284,6 +305,7 @@ def sub_job(save_path, lightweight, job_num, config):
     config['batch_size'] = 4096
 
     # train model
+    logging.info('Training model...')
     model = SQZModel(
         None if lightweight else 
         save_path / MODEL_FOLDER / f'model_{job_num}', **config
@@ -291,9 +313,11 @@ def sub_job(save_path, lightweight, job_num, config):
 
     # if not saving model, save loss values
     if lightweight:
-        model.save_avg_loss(save_path / LOSS_FOLDER / f'loss_{job_num}.txt')
+        loss_path = save_path / LOSS_FOLDER / f'loss_{job_num}.txt'
+        logging.info(f'Loss history saved to {loss_path}.')
+        model.save_avg_loss(loss_path)
 
-def collate_results(save_path, filename='results.txt'):
+def collate_results(save_path, filename='results.txt', delete=True, min_count=8):
     save_path = Path(save_path)
     fetch_path = save_path / LOSS_FOLDER
 
@@ -307,8 +331,16 @@ def collate_results(save_path, filename='results.txt'):
     for file in fetch_path.iterdir():
         if file.stem.startswith('loss_'):
             job_number = int(file.stem.replace('loss_', ''))
-            with open(file) as stream:
-                job_results[job_number] = float(stream.read())
+            loss_history = np.loadtxt(file)
+
+            # take median of lowest min_count losses
+            job_results[job_number] = np.median(
+                sorted(loss_history[:,1])[
+                    :min(min_count, loss_history.shape[0])
+                ]
+            )
+            print(job_number, job_results[job_number])
+            import ipdb; ipdb.set_trace()
         
         job_files += [file]
     
@@ -320,8 +352,9 @@ def collate_results(save_path, filename='results.txt'):
         ))
     
     # after successfully fetching results, delete individual result files
-    for file in job_files:
-        file.unlink()
+    if delete:
+        for file in job_files:
+            file.unlink()
 
     logging.info(f'Collated {len(job_files)} files into {output_path}.')
 
@@ -378,7 +411,10 @@ if __name__ == "__main__":
 
         deploy(save_path, lightweight, nodeploy, config_spans, config)
     elif args[1] == 'collate':
-        collate_results(save_path)
+        # check for nodelete flag
+        nodelete = NODELETE_FLAG in args
+
+        collate_results(save_path, delete=not nodelete)
     else:
         # individual generation member job
         job_num = int(sys.argv[1])

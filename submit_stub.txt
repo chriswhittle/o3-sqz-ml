@@ -3,6 +3,6 @@
 [BATCH_OPTIONS]
 
 source /etc/profile
-module load anaconda/2021a
+module load anaconda/2022b
 
 python [SCRIPT_PATH] $SLURM_ARRAY_TASK_ID config.yaml [SCRIPT_ARGS]

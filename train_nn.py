@@ -415,11 +415,6 @@ class SQZModel:
             else:
                 # define sequence of layers for neural network
                 sequence = []
-
-                # pre-dense layers
-                sequence += [layers.Dense(neural_network['dense_dim'], 
-                        activation=neural_network['activation'])
-                    for _ in range(neural_network['pre_dense_layers'])]
                     
                 # RFF layer
                 # include if non-zero dimension specified or if RNN/CNN
@@ -442,7 +437,7 @@ class SQZModel:
 
                         # first layer of CNN needs input shape
                         if i == 0:
-                            cnn_args = { #TODO: change if pre-dense layers?
+                            cnn_args = {
                                 'input_shape': (self.lookback,
                                                 len(self.feature_columns))
                             }
@@ -528,10 +523,6 @@ class SQZModel:
                         **fit_args
                     )
 
-                # save model
-                if save_path is not None:
-                    model.save(sub_output_path)
-
                 # save loss history
                 cur_loss = model.history.history['loss']
                 loss_history = np.vstack((
@@ -544,9 +535,14 @@ class SQZModel:
                 # re-scale loss history by label std
                 loss_history *= self.labels_detrender.std
 
+                # save loss history to file
                 if save_path is not None:
                     np.savetxt(loss_path, loss_history,
                             header='loss val_loss')
+
+                # save model
+                if save_path is not None:
+                    model.save(sub_output_path)
 
             self.models[i] = model
             self.loss_histories[i] = loss_history
