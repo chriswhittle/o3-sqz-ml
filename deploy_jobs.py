@@ -345,8 +345,6 @@ def collate_results(save_path, filename='results.txt', delete=True, min_count=8)
                     :min(min_count, loss_history.shape[0])
                 ]
             )
-            print(job_number, job_results[job_number])
-            import ipdb; ipdb.set_trace()
         
         job_files += [file]
     
