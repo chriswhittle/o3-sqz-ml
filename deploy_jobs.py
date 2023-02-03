@@ -333,6 +333,7 @@ def collate_results(save_path, filename='results.txt', delete=True, min_count=8)
     
     # fetch results saved in files and put in dictionary
     job_results = {}
+    min_epochs = {}
     job_files = []
     for file in fetch_path.iterdir():
         if file.stem.startswith('loss_'):
@@ -345,6 +346,8 @@ def collate_results(save_path, filename='results.txt', delete=True, min_count=8)
                     :min(min_count, loss_history.shape[0])
                 ]
             )
+
+            min_epochs[job_number] = np.argmin(loss_history[:,1])
         
         job_files += [file]
     
@@ -352,7 +355,7 @@ def collate_results(save_path, filename='results.txt', delete=True, min_count=8)
     output_path = save_path / filename
     with open(output_path, 'w') as stream:
         stream.write('\n'.join(
-            [f'{k} {job_results[k]}' for k in sorted(job_results.keys())]
+            [f'{k} {job_results[k]} {min_epochs[k]}' for k in sorted(job_results.keys())]
         ))
     
     # after successfully fetching results, delete individual result files
