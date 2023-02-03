@@ -177,7 +177,7 @@ class SQZModel:
             # initialize kmeans object for labeling, but instead manually
             # set cluster centers
             self.kmeans = KMeans(
-                n_clusters=cluster_count, random_state=0, max_iter=1
+                n_clusters=cluster_count, random_state=0, max_iter=1, n_init='auto'
             ).fit(self.clusters)
             self.kmeans.cluster_centers_ = np.ascontiguousarray(
                 self.clusters, dtype=float
