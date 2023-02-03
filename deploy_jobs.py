@@ -33,6 +33,9 @@ for the jobs
 If the jobs should be lightweight (i.e. don't save the models), add a --light flag at the end.
 
 If you only want to produce the parameter file (i.e. don't send jobs to slurm), add a --nodeploy flag at the end.
+
+Can also collate data files with
+`python deploy_jobs.py collate config.yaml savepath`
 '''
 
 # label for special 'duration' parameter
@@ -45,6 +48,10 @@ TIME_STEP = 60
 
 # get path to source directory
 source_directory = Path(os.path.dirname(os.path.abspath(__file__)))
+
+# name for job results subdirectory
+LOSS_FOLDER = 'losses'
+MODEL_FOLDER = 'models'
 
 # path for submit script
 SUBMIT_FILENAME = 'batch.sh'
@@ -116,6 +123,12 @@ def deploy(save_path, lightweight, nodeploy, config_spans, config, check_data=Tr
     # ensure save path exists
     save_path = Path(save_path)
     save_path.mkdir(exist_ok=True, parents=True)
+
+    # make subdirectory for results (either for models or losses)
+    if lightweight:
+        (save_path / LOSS_FOLDER).mkdir(exist_ok=True, parents=True)
+    else:
+        (save_path / MODEL_FOLDER).mkdir(exist_ok=True, parents=True)
 
     # initialize list of individual job parameters
     init_config_spans = [{}]
@@ -272,12 +285,45 @@ def sub_job(save_path, lightweight, job_num, config):
 
     # train model
     model = SQZModel(
-        None if lightweight else save_path / f'model_{job_num}', **config
+        None if lightweight else 
+        save_path / MODEL_FOLDER / f'model_{job_num}', **config
     )
 
     # if not saving model, save loss values
     if lightweight:
-        model.save_avg_loss(save_path / f'loss_{job_num}.txt')
+        model.save_avg_loss(save_path / LOSS_FOLDER / f'loss_{job_num}.txt')
+
+def collate_results(save_path, filename='results.txt'):
+    save_path = Path(save_path)
+    fetch_path = save_path / LOSS_FOLDER
+
+    # throw error if folder with losses doesn't exist
+    if not fetch_path.exists():
+        raise FileNotFoundError('{fetch_path} not found.')
+    
+    # fetch results saved in files and put in dictionary
+    job_results = {}
+    job_files = []
+    for file in fetch_path.iterdir():
+        if file.stem.startswith('loss_'):
+            job_number = int(file.stem.replace('loss_', ''))
+            with open(file) as stream:
+                job_results[job_number] = float(stream.read())
+        
+        job_files += [file]
+    
+    # write results to single file
+    output_path = save_path / filename
+    with open(output_path, 'w') as stream:
+        stream.write('\n'.join(
+            [f'{k} {job_results[k]}' for k in sorted(job_results.keys())]
+        ))
+    
+    # after successfully fetching results, delete individual result files
+    for file in job_files:
+        file.unlink()
+
+    logging.info(f'Collated {len(job_files)} files into {output_path}.')
 
 if __name__ == "__main__":
     # show info messages
@@ -331,6 +377,8 @@ if __name__ == "__main__":
                 arg_ind += len(span_keys)
 
         deploy(save_path, lightweight, nodeploy, config_spans, config)
+    elif args[1] == 'collate':
+        collate_results(save_path)
     else:
         # individual generation member job
         job_num = int(sys.argv[1])
