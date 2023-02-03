@@ -235,6 +235,12 @@ def deploy(save_path, lightweight, nodeploy, config_spans, config, check_data=Tr
                 f"{i} {' '.join([f'{k} {v}' for k, v in job.items()])}\n"
             )
 
+    #### get number of runs per job from config file
+    if 'batch_serial_runs' in config['computation']:
+        serial_runs = config['computation']['batch_serial_runs']
+    else:
+        serial_runs = 1
+
     #### submit jobs
     submit_path = Path(save_path) / SUBMIT_FILENAME
     logging.debug(f'Building submit file at {submit_path}...')
@@ -243,7 +249,7 @@ def deploy(save_path, lightweight, nodeploy, config_spans, config, check_data=Tr
     submit_jobs(num_jobs, __file__, 'batch', 
                 submit_path,
                 str(save_path) + (' ' + LIGHTWEIGHT_FLAG) if lightweight else '',
-                config, nodeploy)
+                config, serial_runs, nodeploy)
 
 def sub_job(save_path, lightweight, job_num, config):
     '''

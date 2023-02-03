@@ -5,4 +5,15 @@
 source /etc/profile
 module load anaconda/2022b
 
-python [SCRIPT_PATH] $SLURM_ARRAY_TASK_ID config.yaml [SCRIPT_ARGS]
+NUM_LOCAL=[SERIAL_RUNS]
+
+if (( $NUM_LOCAL > 1 )); then
+    RUN_ID_FIRST=$[ SLURM_ARRAY_TASK_ID * NUM_LOCAL ]
+    RUN_ID_LAST=$[ RUN_ID_FIRST + NUM_LOCAL - 1 ]
+
+    for id in `seq $RUN_ID_FIRST $RUN_ID_LAST`; do
+        python [SCRIPT_PATH] $id config.yaml [SCRIPT_ARGS]
+    done
+else
+    python [SCRIPT_PATH] $SLURM_ARRAY_TASK_ID config.yaml [SCRIPT_ARGS]
+fi
