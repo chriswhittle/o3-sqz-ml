@@ -33,7 +33,7 @@ def submit_jobs(num_jobs, script_path, log_tag, submit_path, script_args = '',
     
     # check if list of jobs being submitted or a job count
     if isinstance(num_jobs, list):
-        array_value = ','.join(num_jobs)
+        array_value = ','.join(map(str, num_jobs))
     else:
         # number of jobs submitted will be total number of runs
         array_max = int(np.ceil(num_jobs/serial_runs)) - 1
