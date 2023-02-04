@@ -98,9 +98,11 @@ def genetic_main(num_features, num_iter, config):
         losses = np.ones(G) * NULL_LOSS
         save_path.touch()
         loaded_save_file = False
+
+    # helper function for calculating incomplete jobs    
+    calc_incomplete = lambda l: list(np.argwhere(l == NULL_LOSS).flatten())
     
     # run through generations of genetic algorithm
-    jobs_submitted = False
     for e in range(GENERATIONS):
         logging.info(f'Main thread starting generation {e}...')
         # write the current row of members to the genetic data file
@@ -122,17 +124,27 @@ def genetic_main(num_features, num_iter, config):
                 # write losses for each member (some marked as uncomputed)
                 file.write(' '.join(map(str, initial_losses)))
 
-        # launch jobs (only done once) when loss file has been written
-        if not jobs_submitted:
-            # start jobs and save job ID
-            logging.info('Submitting jobs')
-            job_id = submit_jobs(G, __file__, 'genetic', submit_path, '', config)
-            jobs_submitted = True
-
-        # periodically poll jobs to check loss values
-        calc_incomplete = lambda l: list(np.argwhere(l == NULL_LOSS).flatten())
+        # list of jobs that need to be run
         incomplete_jobs = calc_incomplete(losses)
+        # count of jobs currently running
+        running_count = 0
+        # periodically poll jobs to check loss values
         while len(incomplete_jobs) > 0:
+
+            # launch jobs if no jobs being run currently
+            if running_count == 0:
+                # start jobs and save job ID
+                logging.info(f'Submitting {len(incomplete_jobs)} jobs')
+                job_id = submit_jobs(
+                    incomplete_jobs,
+                    __file__,
+                    'genetic',
+                    submit_path,
+                    '',
+                    config,
+                    id_logs=False
+                )
+
             # check over each job that hasn't finished computing
             for j in incomplete_jobs:
                 # check job file that will save the loss
@@ -150,14 +162,26 @@ def genetic_main(num_features, num_iter, config):
             incomplete_jobs = calc_incomplete(losses)
             logging.debug('Current incomplete jobs: ' + 
                             ','.join(map(str, incomplete_jobs)))
+
+            # check status of jobs with the latest job ID
+            running_count = int(os.popen(
+                f'''squeue -r -j {job_id} | awk '
+                    BEGIN {{
+                        abbrev["R"]="(Running)"
+                        abbrev["PD"]="(Pending)"
+                    }}
+                    NR>1 {{a[$5]++}}
+                    END {{
+                        print a["R"]+a["PD"]
+                    }}'
+                '''
+            ).read().strip())
+
+            # wait to check job files and job statuses again
             time.sleep(MAIN_POLL_PERIOD)
         
         # convert losses to fitnesses by sorting then using index as fitness
         fitness = (-losses).argsort().argsort()
-
-        # clean up remaining job files
-        for p in Path('.').glob('genetic/job_{}.txt'.format('*')):
-            p.unlink()
 
         # rewrite file with new losses in last line
         with open(save_path) as file:
@@ -209,37 +233,32 @@ def genetic_sub(job_num, gps_ranges, num_features, config):
     G = config['genetic']['pop_size']
     job_file = Path(JOB_LOSS_PATH.format(job_num))
 
-    # job loops until killed by main job or has trained enough models
-    models_trained = 0
-    while models_trained < G:
-        # load latest row in genetic algorithm history file
-        with open(config['genetic_path']) as file:
-            for line in file:
-                prev_generation = line
-                
-            prev_generation = prev_generation.split(' ')
+    # load latest row in genetic algorithm history file
+    with open(config['genetic_path']) as file:
+        for line in file:
+            prev_generation = line
+            
+        prev_generation = prev_generation.split(' ')
 
-        # if the loss recorded for this job's current row is uncomputed,
-        # start training on this subset (assuming the loss hasn't already been
-        # recorded)
-        if (float(prev_generation[job_num + G]) < 0 and not job_file.is_file()):
-            # use job number to get the allocated bitmask (channel subset)
-            # for this job (as a numpy array)
-            current_bitmask_str = prev_generation[job_num]
-            current_bitmask = bitmask_str2np(current_bitmask_str, num_features)
-    
-            # execute training
-            logging.info(f'Running training for {current_bitmask_str}')
-            avg_loss = genetic_job(current_bitmask, gps_ranges,
-                                    num_features, config)
+    # if the loss recorded for this job's current row is uncomputed,
+    # start training on this subset (assuming the loss hasn't already been
+    # recorded)
+    if (float(prev_generation[job_num + G]) < 0 and not job_file.is_file()):
+        # use job number to get the allocated bitmask (channel subset)
+        # for this job (as a numpy array)
+        current_bitmask_str = prev_generation[job_num]
+        current_bitmask = bitmask_str2np(current_bitmask_str, num_features)
 
-            # save average minimum loss to the output file for this job
-            with open(job_file, 'w') as file:
-                file.write(f'{avg_loss}')
-            models_trained += 1
-            logging.info('Training written to file.')
+        # execute training
+        logging.info(f'Running training for {current_bitmask_str}')
+        avg_loss = genetic_job(current_bitmask, gps_ranges,
+                                num_features, config)
 
-        time.sleep(SUB_POLL_PERIOD)
+        # save average minimum loss to the output file for this job
+        with open(job_file, 'w') as file:
+            file.write(f'{avg_loss}')
+        
+        logging.info('Training written to file.')
 
 def genetic_job(bitmask, gps_ranges, num_features, config):
     '''

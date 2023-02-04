@@ -12,12 +12,12 @@ NUM_CORES = 12
 source_directory = Path(os.path.dirname(os.path.abspath(__file__)))
 
 def submit_jobs(num_jobs, script_path, log_tag, submit_path, script_args = '',
-                config = {}, serial_runs=1, nodeploy=False):
+                config = {}, serial_runs=1, nodeploy=False, id_logs=True):
     '''
     Generate new slurm submit script based on given parameters and then use it
     to submit jobs.
 
-    num_jobs = number of jobs to submit
+    num_jobs = number of jobs to submit (or list if submitting specified jobs)
     script_path = path to script each job should run
     log_tag = label to use for log file naming
     submit_path = path of new submit file
@@ -31,15 +31,26 @@ def submit_jobs(num_jobs, script_path, log_tag, submit_path, script_args = '',
     with open(submit_stub_path) as file:
         submit_stub = file.read()
     
-    # number of jobs submitted will be total number of runs
-    array_max = int(np.ceil(num_jobs/serial_runs)) - 1
+    # check if list of jobs being submitted or a job count
+    if isinstance(num_jobs, list):
+        array_value = ','.join(num_jobs)
+    else:
+        # number of jobs submitted will be total number of runs
+        array_max = int(np.ceil(num_jobs/serial_runs)) - 1
+        array_value = f'0-{array_max}'
+    
+    # uniquely identify logs by job ID if specified
+    if id_logs:
+        log_id_suffix = '-%A-%a'
+    else:
+        log_id_suffix = ''
 
     # build batch options string
     # tuple becomes: #SBATCH -e[0] e[1]
     batch_options_list = [
-        ('o', f'logs/{log_tag}.log-%A-%a'),
-        ('e', f'logs/{log_tag}.err-%A-%a'),
-        ('a', f'0-{array_max}'),
+        ('o', f'logs/{log_tag}.log{log_id_suffix}'),
+        ('e', f'logs/{log_tag}.err{log_id_suffix}'),
+        ('a', array_value),
         ('c', NUM_CORES)
     ]
 
