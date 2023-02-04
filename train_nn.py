@@ -177,7 +177,7 @@ class SQZModel:
             # initialize kmeans object for labeling, but instead manually
             # set cluster centers
             self.kmeans = KMeans(
-                n_clusters=cluster_count, random_state=0, max_iter=1, n_init='auto'
+                n_clusters=cluster_count, random_state=0, max_iter=1, n_init=1,
             ).fit(self.clusters)
             self.kmeans.cluster_centers_ = np.ascontiguousarray(
                 self.clusters, dtype=float
@@ -189,9 +189,23 @@ class SQZModel:
             )
         else:
             # do k-means clustering
-            self.kmeans = KMeans(n_clusters=cluster_count, random_state=0).fit(
-                self.detrended_data.training_features
-            )
+            if cluster_count > 1:
+                self.kmeans = KMeans(n_clusters=cluster_count, random_state=0, n_init=1).fit(
+                    self.detrended_data.training_features
+                )
+
+                # use labels allocated during k-means for the training labels
+                training_clusters = self.kmeans.labels_
+            # if only 1 cluster, skip the computation and just use mean immediately
+            else:
+                self.kmeans = KMeans(n_clusters=cluster_count, random_state=0, n_init=1).fit(
+                    self.detrended_data.training_features.mean().to_numpy()[np.newaxis,:]
+                )
+
+                # only one cluster => label all samples as 0th cluster
+                training_clusters = np.zeros(
+                    self.detrended_data.training_features.shape[0]
+                )
             
             self.clusters = pd.DataFrame(
                 self.kmeans.cluster_centers_,
@@ -207,12 +221,9 @@ class SQZModel:
                     output_file_path / self.CLUSTERS_ABS_FILENAME
                 )
 
-            # use labels allocated during k-means for the training labels
-            training_clusters = self.kmeans.labels_
-
         # compute labels for the validation data
         validation_clusters = self.kmeans.predict(
-            self.detrended_data.validation_features
+            self.detrended_data.validation_features.to_numpy()
         )
 
         return self.clusters, training_clusters, validation_clusters
@@ -344,7 +355,8 @@ class SQZModel:
             validation_clusters ) = self.compute_clusters(
                 cluster_count,
                 save_path,
-                output_file_path if save_path is not None else None
+                output_file_path if save_path is not None else None,
+                force_overwrite
         )
         
         ###################################################
