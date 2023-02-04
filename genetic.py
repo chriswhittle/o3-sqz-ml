@@ -196,7 +196,11 @@ def genetic_main(num_features, num_iter, config):
             
             # write newly-computed losses
             file.write(' '.join([str(l) for l in losses]))
-        
+
+        # clean up remaining job files
+        for p in Path('.').glob('genetic/job_{}.txt'.format('*')):
+            p.unlink()
+
         # selection
         selection = np.random.choice(np.arange(G), G_SELECT, replace=False,
                                         p=fitness/np.sum(fitness))
