@@ -47,6 +47,20 @@ def bitmask_np2str(a):
     '''
     return str(int(''.join([str(c) for c in list(a)]), 2))
 
+def update_latest_losses(save_path, generation, losses):
+    with open(save_path) as file:
+        lines = file.readlines()
+    with open(save_path, 'w') as file:
+        for l in lines[:-1]:
+            file.write(l)
+
+        # write generation bitmasks
+        for g in generation:
+            file.write(f'{bitmask_np2str(g)} ')
+        
+        # write newly-computed losses
+        file.write(' '.join([str(l) for l in losses]))
+
 def genetic_main(num_features, num_iter, config):
     '''
     Main loop for handling generations of the genetic algorithm.
@@ -146,6 +160,7 @@ def genetic_main(num_features, num_iter, config):
                 )
 
             # check over each job that hasn't finished computing
+            new_losses = 0
             for j in incomplete_jobs:
                 # check job file that will save the loss
                 job_file = Path(JOB_LOSS_PATH.format(j))
@@ -153,11 +168,15 @@ def genetic_main(num_features, num_iter, config):
                     # load in loss (float representing the averaged loss over
                     # all GPS segments)
                     losses[j] = float(np.loadtxt(job_file))
+                    new_losses += 1
                     # delete job loss file
                     os.remove(job_file)
                     
                     # save this loss in the dictionary of past losses computed
                     past_losses[bitmask_np2str(generation[j])] = losses[j]
+            
+            # if recorded new loss values, update file
+            update_latest_losses(save_path, generation, losses)
             
             incomplete_jobs = calc_incomplete(losses)
             logging.debug('Current incomplete jobs: ' + 
@@ -184,18 +203,7 @@ def genetic_main(num_features, num_iter, config):
         fitness = (-losses).argsort().argsort()
 
         # rewrite file with new losses in last line
-        with open(save_path) as file:
-            lines = file.readlines()
-        with open(save_path, 'w') as file:
-            for l in lines[:-1]:
-                file.write(l)
-
-            # write generation bitmasks
-            for g in generation:
-                file.write(f'{bitmask_np2str(g)} ')
-            
-            # write newly-computed losses
-            file.write(' '.join([str(l) for l in losses]))
+        update_latest_losses(save_path, generation, losses)
 
         # clean up remaining job files
         for p in Path('.').glob('genetic/job_{}.txt'.format('*')):
@@ -221,7 +229,7 @@ def genetic_main(num_features, num_iter, config):
                 new_generation += [new_subset]
         generation = new_generation
 
-        losses = -np.ones(G)
+        losses = np.ones(G) * NULL_LOSS
 
     # kill jobs and remove submit file
     logging.info(f'Killing job {job_id}...')
