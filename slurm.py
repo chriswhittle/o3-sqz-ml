@@ -43,7 +43,7 @@ def submit_jobs(num_jobs, script_path, log_tag, submit_path, script_args = '',
     if id_logs:
         log_id_suffix = '-%A-%a'
     else:
-        log_id_suffix = ''
+        log_id_suffix = '-%a'
 
     # build batch options string
     # tuple becomes: #SBATCH -e[0] e[1]
