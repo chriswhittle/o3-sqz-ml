@@ -164,11 +164,12 @@ def genetic_main(num_features, num_iter, config):
             for j in incomplete_jobs:
                 # check job file that will save the loss
                 job_file = Path(JOB_LOSS_PATH.format(j))
-                if job_file.is_file():
+                if job_file.is_file() and job_file.stat().st_size > 0:
                     # load in loss (float representing the averaged loss over
                     # all GPS segments)
                     losses[j] = float(np.loadtxt(job_file))
                     new_losses += 1
+
                     # delete job loss file
                     os.remove(job_file)
                     
