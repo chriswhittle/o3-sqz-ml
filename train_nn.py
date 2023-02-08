@@ -680,7 +680,7 @@ class SQZModel:
 
         # define number of parameters and bounds
         sobol_problem = {
-            'num_vars': self.feature_columns.shape,
+            'num_vars': self.feature_columns.shape[0],
             'names': self.feature_columns,
             'bounds': list(zip(
                 self.detrended_data.training_features.min().to_list(),
