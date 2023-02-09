@@ -695,13 +695,13 @@ class SQZModel:
                 return Si
 
         # define number of parameters and bounds
+        # use normally distributed variables (already detrended so mean=0, std=1)
+        num_vars = self.feature_columns.shape[0]
         sobol_problem = {
-            'num_vars': self.feature_columns.shape[0],
+            'num_vars': num_vars,
             'names': self.feature_columns,
-            'bounds': list(zip(
-                self.detrended_data.training_features.min().to_list(),
-                self.detrended_data.training_features.max().to_list()
-            ))
+            'bounds': [[0, 1]]*num_vars,
+            'dists': ['norm']*num_vars
         }
 
         # generate random samples
