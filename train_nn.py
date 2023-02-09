@@ -5,6 +5,7 @@ import numpy as np
 
 import pandas as pd
 from tqdm.keras import TqdmCallback
+import pickle
 
 from SALib.sample import saltelli
 from SALib.analyze import sobol
@@ -237,6 +238,7 @@ class SQZModel:
                 interpolate=True, show_progress=False, force_overwrite=False,
                 **kwargs):
         # save_path = None => nothing saved
+        self.save_path = save_path
 
 
         # throw error if clustered neural network and RNN/CNN
@@ -661,7 +663,7 @@ class SQZModel:
     
     ################################################
     #### sensitivity analysis functions
-    def sobol(self, N=1000):
+    def sobol(self, N=1000, save=False):
         '''
         Computes Sobol indices for current model.
 
@@ -677,6 +679,20 @@ class SQZModel:
         '''
         if self.lookback > 0:
             raise RuntimeError('Cannot compute Sobol indices for RNN.')
+
+        # load past computation if it exists
+        save_path = self.save_path
+        if save:
+            if save_path is None:
+                raise RuntimeError('Saving Sobol indices but no save_path specified')
+            
+            sobol_path = Path(save_path) / f'sobol_{N}.pickle'
+
+            if sobol_path.is_file():
+                with open(sobol_path, 'rb') as load_file:
+                    Si = pickle.load(load_file)
+                
+                return Si
 
         # define number of parameters and bounds
         sobol_problem = {
@@ -696,6 +712,11 @@ class SQZModel:
 
         # compute Sobol indices
         Si = sobol.analyze(sobol_problem, est_sqz)
+
+        # save results if specified
+        if save:
+            with open(sobol_path, 'wb') as save_file:
+                pickle.dump(Si, save_file, pickle.HIGHEST_PROTOCOL)
 
         return Si
     
