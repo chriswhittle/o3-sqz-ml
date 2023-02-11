@@ -41,8 +41,8 @@ def load_data(processed_path, nominal_blrms_lims, channels,
     sqz_column = f'SQZ_dB {nominal_blrms_lims[0]}-{nominal_blrms_lims[1]}Hz'
     other_sqz = data.columns[data.columns.str.startswith('SQZ')]
     other_sqz = other_sqz.drop(sqz_column)
-    data.drop(other_sqz, axis=1, inplace=True)
-    data.rename(columns={sqz_column: 'SQZ'}, inplace=True)
+    data = data.drop(other_sqz, axis=1)
+    data = data.rename(columns={sqz_column: 'SQZ'})
 
     # remove cut channels by first generating list of channels in dataframe
     # to be removed
@@ -50,7 +50,7 @@ def load_data(processed_path, nominal_blrms_lims, channels,
     for c in cut_channels:
         if channels[c] in data.columns and channels[c] != 'SQZ':
             readable_cut += [channels[c]]
-    data.drop(readable_cut, axis=1, inplace=True)
+    data = data.drop(readable_cut, axis=1)
 
     return data
 
@@ -268,8 +268,8 @@ class SQZModel:
         sub_end_gps = int(sub_end_gps)
         if val_start_gps is None or val_end_gps is None:
             # trim data to within given GPS times
-            data.drop(data[(data.index < sub_start_gps) 
-                            | (data.index > sub_end_gps)].index, inplace=True)
+            data = data.drop(data[(data.index < sub_start_gps) 
+                            | (data.index > sub_end_gps)].index)
 
             # use given validation fraction to separate training and validation
             # features
@@ -832,8 +832,11 @@ class SQZModel:
                 # create temporary third column with the absolute value of the
                 # gradient for sorting
                 gradient_df['abs_gradient'] = gradient_df['Gradient'].abs()
-                gradient_df.sort_values(by='abs_gradient', inplace=True)
-                gradient_df.drop('abs_gradient', axis=1, inplace=True)
+                gradient_df = gradient_df.sort_values(
+                    by='abs_gradient',
+                    ascending=False
+                )
+                gradient_df = gradient_df.drop('abs_gradient', axis=1)
 
             gradients[i] = gradient_df
         
