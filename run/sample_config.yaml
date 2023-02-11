@@ -6,6 +6,7 @@ ifo: X0
 start_gps: 1256875000
 end_gps: 1269734418
 
+# reference period with interferometer locked and no squeezing
 no_sqz_start_gps: 1259798868
 no_sqz_end_gps: 1259799468
 
@@ -26,6 +27,7 @@ cut_channels:
   - GRD-ISC_LOCK_OK.min,m-trend
   - GRD-SQZ_MANAGER_OK.min,m-trend
 
+# inputs to the model (and readable labels)
 channels:
  SQZ-OPO_TEC_THERMISTOR_TEMPERATURE.mean,m-trend: OPO Temp.
  SQZ-SHG_TEC_THERMISTOR_TEMPERATURE.mean,m-trend: SHG Temp.
@@ -48,9 +50,15 @@ neural_network:
   rff_dim: 4096
   activation: tanh
   epochs: 30
-  lstm_dim: 0
-  lstm_lookback: 0
+  lookback: 0 # should be 0 if not using CNN or RNN
+  cnn:
+    dim: 0
+    kernel_sizes: [] # list of kernel sizes associated with each layer
+  rnn: # type options: lstm / none
+    type: none
+    dim: 0
 
+# number of distinct models to train; should be 1 for CNN/RNN
 cluster_count: 1
 
 #### GENETIC ALGORITHM DETAILS
@@ -66,9 +74,80 @@ genetic:
     - - 1262059000
       - 1264651000
 
+# options that overwrite the neural network options above
 genetic_network:
   epochs: 20
 
 #### SLURM OPTIONS
 computation:
   excluded_hosts: []
+  batch_serial_runs: 4
+
+#### PAPER PLOT OPTIONS
+# only necessary if producing plots with plotting.py
+plotting:
+  cut_channels:
+    - SQZ-SHG_TEC_THERMISTOR_TEMPERATURE.mean,m-trend
+  summary:
+    figure_path: plots/summary.pdf
+    bins: 500
+  timeseries:
+    figure_path: plots/timeseries.pdf
+    sub_start_gps: 1262911560
+    sub_duration: 3125160
+    sqz_limits:
+      - 1.5
+      - 3
+    window_size: 20
+    neural_networks:
+    - label: Model (linear)
+      path: models/plots/timeseries/linear
+      options:
+        activation: linear
+        dense_layers: 0
+        rff_dim: 0
+    - label: Model (linear w/ cross-terms)
+      path: models/plots/timeseries/linear_1
+      options:
+        activation: linear
+        dense_layers: 1
+        rff_dim: 0
+    - label: Model (neural network)
+      path: models/plots/timeseries/sigmoid_2_rff
+      options:
+        activation: sigmoid
+        dense_layers: 2
+        rff_dim: 4096
+  genetic:
+    figure_path: plots/genetic.pdf
+    highlight_channels:
+      - SQZ-OPO_TEC_THERMISTOR_TEMPERATURE.mean,m-trend
+  cluster:
+    figure_path: plots/cluster.pdf
+    model_path: models/plots/cluster/dummy
+    cluster_count: 5
+    zoom_start_gps: 1257977540
+    zoom_duration: 312540
+    zoom_channels:
+      - OPO Temp.
+  gradient:
+    figure_path: plots/gradients/gradient_{}_{}.pdf
+    val_figure_path: plots/gradients/val_{}.pdf
+    model_path: models/plots/gradient
+    sub_start_gps:
+      - 1241511540
+      - 1248511560
+      - 1258911540
+      - 1262911560
+    sub_duration: 3125160
+  sobol:
+    figure_path: plots/sobol.pdf 
+    model_path: models/plots/sobol
+    samples: 10 # 10000000
+    plot_errors: false
+    sub_start_gps:
+      - 1241511540
+      - 1248511560
+      - 1258911540
+      - 1262911560
+    sub_duration: 3125160
