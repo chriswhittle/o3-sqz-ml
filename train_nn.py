@@ -77,7 +77,6 @@ class Detrender:
             if save_path is not None:
                 np.savetxt(save_path, np.vstack((self.mean, self.std)))
 
-
     def detrend(self, data):
         return (data - self.mean) / self.std
     

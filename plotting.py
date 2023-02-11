@@ -40,6 +40,12 @@ def make_path(path_string):
     path.parent.mkdir(exist_ok=True, parents=True)
     return path
 
+def remove_outliers(data, m=4.):
+    d = np.abs(data - np.median(data))
+    mdev = np.median(d)
+    s = d/mdev
+    return data[s<m]
+
 def fill_nans(df):
     # create array of contiguous timesteps
     full_times = np.arange(
@@ -255,6 +261,15 @@ def genetic(**config):
     counts = np.tile(np.arange(losses.shape[0])[:, np.newaxis] + 1,
                         (1, num_features))
     cum_inclusions = sum_inclusions / counts
+    
+    # save channels with cumulative inclusion to text file
+    with open(sub_config['table_path'], 'w') as table_file:
+        table_file.write('\n'.join(
+            [
+                f'{c}\t{config["channels"][c]}\t{cum_inclusions[-1,i]:.2f}\t{optimal_bitmask[i]}'
+                for i, c in enumerate(channels)
+            ]
+        ))
 
     # make plot
     plt.figure(figsize=(3.5, 3.2))
@@ -386,9 +401,12 @@ def cluster(step_f=2e-3, **config):
     # draw time series of channels
     ts_ax = plt.subplot(4, 1, 3)
     for c in sub_config['zoom_channels']:
-        plt.plot(fill_nans(
-            full_model.detrended_data.training_features[inds][c]
-        ), label=c, alpha=0.75)
+        channel_values = full_model.detrended_data.training_features[inds][c]
+
+        # remove outliers (removes glitches when e.g. relocking)
+        channel_values = remove_outliers(channel_values)
+
+        plt.plot(fill_nans(channel_values), label=c, alpha=0.75)
     
     # time series plotting style
     plt.legend(loc='center', bbox_to_anchor=(0.5, -0.9))
@@ -412,6 +430,9 @@ def gradient(plot_sign=False, **config):
     figure_path = make_path(sub_config['figure_path'])
 
     config['cut_channels'] = config['plotting']['cut_channels']
+
+    # which cluster ordering to sort by
+    sort_by = sub_config['sort_by_cluster']
     
     # train models
     models = [None]*len(sub_config['sub_start_gps'])
@@ -457,7 +478,7 @@ def gradient(plot_sign=False, **config):
         plt.subplot(212)
         plt.plot(model.detrended_data.validation_features['uSeism.-X 300M-1'])
         plt.plot(model.detrended_data.validation_features['uSeism.-Y 100M-300M'])
-        plt.plot(model.detrended_data.validation_features['ZM2 Y (RMS)'])
+        plt.plot(model.detrended_data.validation_features['ZM1 P (RMS)'])
         plt.plot(model.detrended_data.validation_features['INP2 P (RMS)'])
         plt.savefig(sub_config['val_figure_path'].format(
             sub_config['sub_start_gps'][i]
@@ -465,18 +486,28 @@ def gradient(plot_sign=False, **config):
         plt.close()
 
         # compute gradients at each cluster
+        dfs = [None]*full_model.clusters.shape[0]
         for j, cluster in full_model.clusters.iterrows():
             # convert cluster to raw data coordinates
             raw_cluster = full_model.features_detrender.retrend(cluster)
 
             # compute gradient
-            gradients_df = model.gradient(point=raw_cluster)[0]
+            gradients_df = model.gradient(point=raw_cluster, sort=sort_by is None)[0]
 
             # differentiate between positive and negative gradients for plotting
             grads = gradients_df['Gradient']
             gradients_df['abs'] = np.abs(grads)
             gradients_df['$+$'] = grads * (grads>0)
             gradients_df['$-$'] = -1 * grads * (grads<0)
+
+            dfs[j] = gradients_df
+        
+        if sort_by is not None:
+            sort_inds = np.argsort(dfs[sort_by]['abs'])[::-1]
+        
+        for j, gradients_df in enumerate(dfs):
+            if sort_by is not None:
+                gradients_df = gradients_df.iloc[sort_inds]
 
             plt.figure(figsize=(3.75, 3.25))
 
@@ -582,30 +613,29 @@ def sobol(**config):
 
     # make plot
     _, ((dummy_ax, cbar_ax), (bar_ax, heat_ax)) = plt.subplots(
-        2, 2, figsize=(7, 5), gridspec_kw={'height_ratios': (1, 8)}
+        2, 2, figsize=(7, 4.5), gridspec_kw={'height_ratios': (1, 12)}
     )
 
+    # colors for bar plot
     cmap = plt.get_cmap('tab20')
 
-    # bar plot of ST
-    sns.barplot(
-        x = 'Channel',
-        y = 'Sobol index',
-        color = cmap(1),
-        data = pd.DataFrame({'Channel': sorted_columns, 'Sobol index': Si['ST'][inds]}),
-        yerr = Si['ST_conf'][inds]/2 if plot_errors else None,
-        ax = bar_ax
-    )
+    # cap S1 values by ST
+    Si['S1'] = np.clip(Si['S1'], None, Si['ST'])
 
-    # bar plot of S1
-    barplot = sns.barplot(
-        x = 'Channel',
-        y = 'Sobol index',
-        color = cmap(3),
-        data = pd.DataFrame({'Channel': sorted_columns, 'Sobol index': Si['S1'][inds]}),
-        yerr = Si['S1_conf'][inds]/2 if plot_errors else None,
-        ax = bar_ax
-    )
+    # bar plot of ST and S1
+    for col, err_col, index in zip([cmap(1), cmap(3)], [cmap(0), cmap(2)], ['ST', 'S1']):
+        barplot = sns.barplot(
+            x = 'Channel',
+            y = 'Sobol index',
+            color = col,
+            data = pd.DataFrame({
+                'Channel': sorted_columns,
+                'Sobol index': Si[index][inds]
+            }),
+            yerr = Si[f'{index}_conf'][inds]/2 if plot_errors else None,
+            ecolor = err_col,
+            ax = bar_ax
+        )
 
     # bar plot style
     barplot.set_yscale("log")
@@ -631,7 +661,8 @@ def sobol(**config):
         yticklabels=model.feature_columns[inds],
         cmap='flare',
         cbar_kws = {
-            'orientation': 'horizontal'
+            'orientation': 'horizontal',
+            'label': '$S_2$'
         },
         cbar_ax = cbar_ax,
         ax = heat_ax
