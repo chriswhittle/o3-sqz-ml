@@ -34,6 +34,7 @@ PD_TYPES = (pd.DataFrame, pd.Series)
 
 def load_data(processed_path, nominal_blrms_lims, channels,
                 cut_channels, **kwargs):
+    '''Load in data from processed file and remove channels that are cut.'''
     # load in data
     data = pd.read_csv(processed_path, index_col='gps_time')
 
@@ -56,12 +57,14 @@ def load_data(processed_path, nominal_blrms_lims, channels,
 
 @dataclass
 class SQZData:
+    '''Dataclass for holding training and validation data for SQZ model.'''
     training_features: pd.DataFrame
     training_labels: pd.DataFrame
     validation_features: pd.DataFrame
     validation_labels: pd.DataFrame
 
 class Detrender:
+    '''Class for detrending and retrending data.'''
     def __init__(self, data, save_path=None, loading_model=True):
         # try to load detrend values from file
         if (save_path is not None and save_path.is_file() and loading_model):
@@ -84,6 +87,7 @@ class Detrender:
         return data * self.std + self.mean
 
 class SQZModel:
+    '''Class for training and evaluating squeezing estimator.'''
     # filename constants
     LOSS_HISTORY_FILENAME = 'loss.txt'
     DETREND_FEATURES_FILENAME = 'detrend_features.txt'
@@ -96,6 +100,7 @@ class SQZModel:
     ################################################
     #### helper function for saving training history
     def save_avg_loss(self, save_path):
+        '''Save average loss history to file.'''
         np.savetxt(
             save_path,
             self.loss_history_avg,
@@ -106,6 +111,7 @@ class SQZModel:
     #### helper function for building datasets for
     #### RNN input
     def build_sequence_dataset(self, features, labels=None, times=False):
+        '''Build sliding window dataset for RNN input.'''
         # handle gaps in data to avoid windows spanning more than nominal time
         # step
         if (isinstance(features, PD_TYPES) and 
@@ -162,6 +168,7 @@ class SQZModel:
     #### cluster computation
     def compute_clusters(self, cluster_count, save_path=None,
                         output_file_path=None, force_overwrite=False):
+        '''Compute cluster centroids for training data.'''
         loading_model = (save_path is not None and not force_overwrite)
         
         # try to load cluster centroids
@@ -236,6 +243,7 @@ class SQZModel:
                 save_period=10, batch_size=512, cluster_count=1,
                 interpolate=True, show_progress=False, force_overwrite=False,
                 **kwargs):
+        '''Initialize and train the neural network model.'''
         # save_path = None => nothing saved
         self.save_path = save_path
 
@@ -591,6 +599,7 @@ class SQZModel:
     ################################################
     #### predict squeezing level using trained model
     def estimate_sqz(self, features):
+        '''Use model to estimate squeezing level from given features.'''
         # transpose if given a single point
         if features.ndim == 1:
             if not isinstance(features, np.ndarray):
@@ -720,6 +729,7 @@ class SQZModel:
         return Si
     
     def __gradient_tape(self, model, point, depth=1):
+        '''Recursive function to compute gradient of model at point.'''
         if depth == 0:
             return model(point)
 
@@ -729,6 +739,7 @@ class SQZModel:
 
     def gradient(self, normalize=True, sort=True, depth=1, point=None,
                 numerical=False):
+        '''Compute gradient of model at specified point.'''
         if self.lookback > 0:
             raise RuntimeError('Cannot compute gradient for RNN.')
 

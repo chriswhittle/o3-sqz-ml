@@ -1,0 +1,253 @@
+#### DATA FETCHING
+
+keytab_path: /home/chris.whittle/sqz/chris.whittle.keytab
+ifo: L1
+
+#### GPS TIME DATA
+
+start_gps: 1238112018 # O3a start Apr 1
+end_gps: 1269734418
+
+no_sqz_start_gps: 1259798868
+no_sqz_end_gps: 1259799468
+
+sqz_path: data/sqz_data.csv
+aux_path: data/aux_data.csv
+processed_path: data/data.csv
+
+#### CHANNELS DATA
+
+veto_channels:
+  GRD-ISC_LOCK_OK.min,m-trend: 1
+  GRD-SQZ_MANAGER_OK.min,m-trend: 1
+  SYS-MOTION_C_BDIV_C_POSITION.min,m-trend: 0
+
+ifo_lock_channels:
+  GRD-ISC_LOCK_OK.min,m-trend: 1
+
+cut_channels:
+  - GRD-ISC_LOCK_OK.min,m-trend
+  - GRD-SQZ_MANAGER_OK.min,m-trend
+  - SQZ-DCPD_RATIO_3_dB_MON.mean,m-trend
+  - TCS-SIM_ITMX_SUB_DEFOCUS_FULL_SINGLE_PASS_OUTPUT.mean,m-trend
+  - TCS-SIM_ITMY_SUB_DEFOCUS_FULL_SINGLE_PASS_OUTPUT.mean,m-trend
+  - TCS-SIM_ITMX_SURF_ROC_FULL_OUTPUT.mean,m-trend
+  - ASC-PRC1_P_OUTPUT.mean,m-trend
+  - ASC-PRC1_P_OUTPUT.rms,m-trend
+  - ASC-PRC1_Y_OUTPUT.mean,m-trend
+  - ASC-PRC1_Y_OUTPUT.rms,m-trend
+
+nominal_blrms_lims:
+  - 1100
+  - 1900
+
+blrms_lims:
+  - - 550
+    - 950
+  - - 1100
+    - 1900
+  - - 2960
+    - 3260
+  - - 3450
+    - 4450
+
+channels:
+  ASC-CHARD_P_OUTPUT.mean,m-trend: CHARD P
+  ASC-CHARD_P_OUTPUT.rms,m-trend: CHARD P (RMS)
+  ASC-CHARD_Y_OUTPUT.mean,m-trend: CHARD Y
+  ASC-CHARD_Y_OUTPUT.rms,m-trend: CHARD Y (RMS)
+  ASC-DHARD_P_OUTPUT.mean,m-trend: DHARD P
+  ASC-DHARD_P_OUTPUT.rms,m-trend: DHARD P (RMS)
+  ASC-DHARD_Y_OUTPUT.mean,m-trend: DHARD Y
+  ASC-DHARD_Y_OUTPUT.rms,m-trend: DHARD Y (RMS)
+  ASC-INP2_P_OUTPUT.mean,m-trend: INP2 P
+  ASC-INP2_P_OUTPUT.rms,m-trend: INP2 P (RMS)
+  ASC-INP2_Y_OUTPUT.mean,m-trend: INP2 Y
+  ASC-INP2_Y_OUTPUT.rms,m-trend: INP2 Y (RMS)
+  ASC-MICH_P_OUTPUT.mean,m-trend: MICH P
+  ASC-MICH_P_OUTPUT.rms,m-trend: MICH P (RMS)
+  ASC-MICH_Y_OUTPUT.mean,m-trend: MICH Y
+  ASC-MICH_Y_OUTPUT.rms,m-trend: MICH Y (RMS)
+  OMC-ASC_P1_I_OUTPUT.mean,m-trend: OMC1 PITCH
+  OMC-ASC_P1_I_OUTPUT.rms,m-trend: OMC1 PITCH (RMS)
+  OMC-ASC_P2_I_OUTPUT.mean,m-trend: OMC2 PITCH
+  OMC-ASC_P2_I_OUTPUT.rms,m-trend: OMC2 PITCH (RMS)
+  OMC-ASC_Y1_I_OUTPUT.mean,m-trend: OMC1 YAW
+  OMC-ASC_Y1_I_OUTPUT.rms,m-trend: OMC1 YAW (RMS)
+  OMC-ASC_Y2_I_OUTPUT.mean,m-trend: OMC2 YAW
+  OMC-ASC_Y2_I_OUTPUT.rms,m-trend: OMC2 YAW (RMS)
+  ASC-PRC1_P_OUTPUT.mean,m-trend: PRC1 P
+  ASC-PRC1_P_OUTPUT.rms,m-trend: PRC1 P (RMS)
+  ASC-PRC1_Y_OUTPUT.mean,m-trend: PRC1 Y
+  ASC-PRC1_Y_OUTPUT.rms,m-trend: PRC1 Y (RMS)
+  ASC-PRC2_P_OUTPUT.mean,m-trend: PRC2 P
+  ASC-PRC2_P_OUTPUT.rms,m-trend: PRC2 P (RMS)
+  ASC-PRC2_Y_OUTPUT.mean,m-trend: PRC2 Y
+  ASC-PRC2_Y_OUTPUT.rms,m-trend: PRC2 Y (RMS)
+  GRD-ISC_LOCK_OK.min,m-trend: ISC OK
+  GRD-SQZ_MANAGER_OK.min,m-trend: SQZ OK
+  ISI-GND_STS_ETMX_Y_BLRMS_100M_300M.mean,m-trend: uSeism.-X 100M-300M
+  ISI-GND_STS_ETMX_Y_BLRMS_300M_1.mean,m-trend: uSeism.-X 300M-1
+  ISI-GND_STS_ETMY_Y_BLRMS_100M_300M.mean,m-trend: uSeism.-Y 100M-300M
+  ISI-GND_STS_ETMY_Y_BLRMS_300M_1.mean,m-trend: uSeism.-Y 300M-1
+  SQZ-DCPD_RATIO_3_dB_MON.mean,m-trend: SQZ
+  SQZ-OPO_IR_LF_OUTPUT.mean,m-trend: OPO green trans.
+  SQZ-OPO_REFL_DC_POWER.mean,m-trend: OPO green refl.
+  SQZ-OPO_TEC_THERMISTOR_TEMPERATURE.mean,m-trend: OPO Temp.
+  SQZ-SHG_TEC_THERMISTOR_TEMPERATURE.mean,m-trend: SHG Temp.
+  SUS-ZM1_M1_DAMP_P_OUTPUT.mean,m-trend: ZM1 P
+  SUS-ZM1_M1_DAMP_P_OUTPUT.rms,m-trend: ZM1 P (RMS)
+  SUS-ZM1_M1_DAMP_Y_OUTPUT.mean,m-trend: ZM1 Y
+  SUS-ZM1_M1_DAMP_Y_OUTPUT.rms,m-trend: ZM1 Y (RMS)
+  SUS-ZM2_M1_DAMP_P_OUTPUT.mean,m-trend: ZM2 P
+  SUS-ZM2_M1_DAMP_P_OUTPUT.rms,m-trend: ZM2 P (RMS)
+  SUS-ZM2_M1_DAMP_Y_OUTPUT.mean,m-trend: ZM2 Y
+  SUS-ZM2_M1_DAMP_Y_OUTPUT.rms,m-trend: ZM2 Y (RMS)
+  TCS-SIM_ITMX_SUB_DEFOCUS_FULL_SINGLE_PASS_OUTPUT.mean,m-trend: TCS substrate ITMX
+  TCS-SIM_ITMX_SURF_ROC_FULL_OUTPUT.mean,m-trend: TCS ROC ITMX
+  TCS-SIM_ITMY_SUB_DEFOCUS_FULL_SINGLE_PASS_OUTPUT.mean,m-trend: TCS substrate ITMY
+  TCS-SIM_ITMY_SURF_ROC_FULL_OUTPUT.mean,m-trend: TCS ROC ITMY
+
+#### NEURAL NETWORK CONFIGURATION
+neural_network:
+  dense_layers: 2
+  dense_dim: 64
+  rff_dim: 4096
+  activation: sigmoid
+  epochs: 30
+  lookback: 0
+  cnn:
+    dim: 0
+    kernel_sizes: []
+  rnn:
+    type: none
+    dim: 0
+
+#cluster_count: 4
+cluster_count: 1
+
+#### GENETIC ALGORITHM DETAILS
+genetic_path: genetic/genetic_full.txt
+
+genetic:
+  pop_size: 80
+  # check 4 month-long ranges
+  gps_ranges:
+    - - 1238710320
+      - 1241835480
+    - - 1243510320 # only second run
+      - 1246635480
+    - - 1247703900
+      - 1250829060
+    - - 1256491920 # only second run
+      - 1259617080
+    - - 1260031920
+      - 1263157080
+    - - 1263591900
+      - 1266717060
+
+genetic_network:
+  # epochs: 25 # first run
+  epochs: 30 # second run
+
+#### SLURM OPTIONS
+computation:
+  excluded_hosts: []
+  batch_serial_runs: 4
+
+#### PAPER PLOT OPTIONS
+plotting:
+  cut_channels:
+    - ASC-CHARD_P_OUTPUT.mean,m-trend
+    - ASC-CHARD_P_OUTPUT.rms,m-trend
+    - ASC-CHARD_Y_OUTPUT.rms,m-trend
+    - ASC-DHARD_P_OUTPUT.mean,m-trend
+    - ASC-DHARD_Y_OUTPUT.rms,m-trend
+    - ASC-INP2_P_OUTPUT.mean,m-trend
+    - ASC-INP2_Y_OUTPUT.mean,m-trend
+    - ASC-INP2_Y_OUTPUT.rms,m-trend
+    - ASC-MICH_P_OUTPUT.rms,m-trend
+    - ASC-MICH_Y_OUTPUT.mean,m-trend
+    - OMC-ASC_Y1_I_OUTPUT.mean,m-trend
+    - OMC-ASC_Y1_I_OUTPUT.rms,m-trend
+    - OMC-ASC_Y2_I_OUTPUT.rms,m-trend
+    - ASC-PRC2_P_OUTPUT.mean,m-trend
+    - ASC-PRC2_Y_OUTPUT.mean,m-trend
+    - ASC-PRC2_Y_OUTPUT.rms,m-trend
+    - ISI-GND_STS_ETMX_Y_BLRMS_100M_300M.mean,m-trend
+    - ISI-GND_STS_ETMY_Y_BLRMS_300M_1.mean,m-trend
+    - SQZ-OPO_REFL_DC_POWER.mean,m-trend
+    - SQZ-SHG_TEC_THERMISTOR_TEMPERATURE.mean,m-trend
+    - SUS-ZM1_M1_DAMP_P_OUTPUT.mean,m-trend
+    - SUS-ZM1_M1_DAMP_Y_OUTPUT.rms,m-trend
+    - SUS-ZM2_M1_DAMP_P_OUTPUT.mean,m-trend
+    - SUS-ZM2_M1_DAMP_P_OUTPUT.rms,m-trend
+    - SUS-ZM2_M1_DAMP_Y_OUTPUT.rms,m-trend
+  summary:
+    figure_path: plots/summary.pdf
+    bins: 500
+  timeseries:
+    figure_path: plots/timeseries.pdf
+    sub_start_gps: 1262911560 # 1263119940 # 1263893460
+    sub_duration: 3125160
+    sqz_limits:
+      - 1.5
+      - 3
+    window_size: 20
+    neural_networks:
+    - label: Model (linear)
+      path: models/plots/timeseries/lineara
+      options:
+        activation: linear
+        dense_layers: 0
+        rff_dim: 0
+    - label: Model (linear w/ cross-terms)
+      path: models/plots/timeseries/linear_1a
+      options:
+        activation: linear
+        dense_layers: 1
+        rff_dim: 0
+    - label: Model (neural network)
+      path: models/plots/timeseries/sigmoid_2_rffa
+      options:
+        activation: sigmoid
+        dense_layers: 2
+        rff_dim: 4096
+  genetic:
+    figure_path: plots/genetic.pdf
+    table_path: genetic/genetic_table.txt
+    highlight_channels:
+      - SQZ-OPO_TEC_THERMISTOR_TEMPERATURE.mean,m-trend
+      - SQZ-OPO_IR_LF_OUTPUT.mean,m-trend
+      - SUS-ZM2_M1_DAMP_Y_OUTPUT.mean,m-trend
+  cluster:
+    figure_path: plots/cluster.pdf
+    model_path: models/plots/cluster/dummy
+    cluster_count: 5
+    zoom_start_gps: 1257977540
+    zoom_duration: 312540
+    zoom_channels:
+      - uSeism.-Y 100M-300M
+      - ZM1 P (RMS)
+  gradient:
+    figure_path: plots/gradients/gradient_{}_{}.pdf
+    val_figure_path: plots/gradients/val_{}.pdf
+    model_path: models/plots/gradient
+    sort_by_cluster: 4
+    sub_start_gps:
+      - 1241511540
+      - 1248511560
+      - 1258911540
+      - 1262911560
+    sub_duration: 3125160
+  sobol:
+    figure_path: plots/sobol.pdf 
+    model_path: models/plots/sobol
+    samples: 1048576
+    plot_errors: true
+    sub_start_gps:
+      - 1241511540
+      - 1248511560
+      - 1258911540
+      - 1262911560
+    sub_duration: 3125160

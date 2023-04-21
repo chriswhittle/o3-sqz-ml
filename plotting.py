@@ -72,6 +72,11 @@ def summary(**config):
     sqz_levels[gap_gps_end - TIME_STEP] = np.nan
     sqz_levels = sqz_levels.sort_index()
 
+    # print mean, std and 90% CI of sqz level
+    print(f'{sqz_levels.mean():.2f} dB')
+    print(f'{sqz_levels.std():.2f} dB')
+    print(np.nanpercentile(sqz_levels, [5, 95]))
+
     # make plot
     fig = plt.figure(figsize=(3.5, 2.25))
     ax1, ax2 = fig.subplots(1, 2, sharey=True, width_ratios=[7, 1])
@@ -161,7 +166,7 @@ def timeseries(**config):
         (val_labels.index - val_labels.index[0])/t_rescale,
         val_labels.values,
         c='gray',
-        alpha=0.2
+        alpha=0.7
     )
 
     # plot rolling average of sqz levels
@@ -170,7 +175,7 @@ def timeseries(**config):
     plt.plot(
         (smooth_labels.index - smooth_labels.index[0])/t_rescale,
         smooth_labels.values,
-        c='gray',
+        c='k',
         alpha=1,
         label='True squeezing'
     )
